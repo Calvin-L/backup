@@ -1,0 +1,11 @@
+# Build products
+/build
+/dist
+/.gradle
+*.jar
+*.class
+/aescrypt-*
+
+# IDEs
+.idea
+*.sublime-*
