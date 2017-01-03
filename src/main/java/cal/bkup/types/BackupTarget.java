@@ -1,7 +1,6 @@
 package cal.bkup.types;
 
 import java.io.IOException;
-import java.util.function.Consumer;
 
 public interface BackupTarget extends AutoCloseable {
 

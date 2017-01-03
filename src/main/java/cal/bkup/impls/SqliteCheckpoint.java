@@ -8,13 +8,11 @@ import cal.bkup.types.Resource;
 import cal.bkup.types.SimpleDirectory;
 
 import java.io.BufferedOutputStream;
-import java.io.BufferedWriter;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -58,10 +56,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
         System.out.println("Loaded checkpoint " + lastSave);
       } catch (IOException e) {
         System.out.println("Load failed [" + e + "]; creating new checkpoint");
-        try (FileOutputStream out = new FileOutputStream(file.toString())) {
-          FileChannel outChan = out.getChannel();
-          outChan.truncate(0);
-        }
+        Files.deleteIfExists(file);
         lastSave = null;
       }
     } else {
@@ -69,13 +64,22 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
       lastSave = null;
     }
 
-    reopen();
+    try {
+      reopen();
+    } catch (Exception e) {
+      System.out.println("Load failed [" + e + "]; creating new checkpoint");
+      Files.deleteIfExists(file);
+      reopen();
+      lastSave = null;
+    }
   }
 
   @Override
-  public synchronized Instant modTime(Resource r) {
+  public synchronized Instant modTime(Resource r, BackupTarget target) {
     try {
-      queryModTime.setString(1, r.path().toString());
+      queryModTime.setString(1, r.system().toString());
+      queryModTime.setString(2, r.path().toString());
+      queryModTime.setString(3, target.name().toString());
       try (ResultSet rs = queryModTime.executeQuery()) {
         if (rs.next()) {
           long ms = rs.getLong("ms_since_unix_epoch");
@@ -97,10 +101,11 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   @Override
   public synchronized void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException {
     try {
-      insertFileRecord.setString(1, r.path().toString());
-      insertFileRecord.setLong(2, r.modTime().toEpochMilli());
-      insertFileRecord.setString(3, target.name().toString());
-      insertFileRecord.setString(4, asId.toString());
+      insertFileRecord.setString(1, r.system().toString());
+      insertFileRecord.setString(2, r.path().toString());
+      insertFileRecord.setLong(3, r.modTime().toEpochMilli());
+      insertFileRecord.setString(4, target.name().toString());
+      insertFileRecord.setString(5, asId.toString());
       insertFileRecord.executeUpdate();
     } catch (SQLException e) {
       throw new IOException(e);
@@ -143,13 +148,13 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     conn.setAutoCommit(false);
 
     try (Statement init = conn.createStatement()) {
-      init.execute("CREATE TABLE IF NOT EXISTS files (file TEXT, ms_since_unix_epoch INT, target TEXT, id TEXT)");
-      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_idx ON files (file)");
+      init.execute("CREATE TABLE IF NOT EXISTS files (system TEXT, file TEXT, ms_since_unix_epoch INT, target TEXT, id TEXT)");
+      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_idx ON files (system, file, target)");
     }
     conn.commit();
 
-    queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE file=? LIMIT 1");
-    insertFileRecord = conn.prepareStatement("INSERT INTO files (file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?)");
+    queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
+    insertFileRecord = conn.prepareStatement("INSERT INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
 
   }
 

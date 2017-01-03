@@ -9,7 +9,7 @@ public interface Checkpoint extends AutoCloseable {
    * @param r the resource to check
    * @return last modification time of <code>r</code>, or <code>null</code> if <code>r</code> is not backed up
    */
-  Instant modTime(Resource r);
+  Instant modTime(Resource r, BackupTarget target);
 
   Instant lastSave();
 

@@ -12,23 +12,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Instant;
-import java.time.format.DateTimeFormatter;
-import java.util.function.Consumer;
+import java.util.UUID;
 
 public class FilesystemBackupTarget implements BackupTarget {
 
   private final Id id;
   private final Path root;
 
-  private static String now() {
-    return DateTimeFormatter.ISO_INSTANT.format(Instant.now());
-  }
-
   public FilesystemBackupTarget(Path root) {
     id = new Id("file:" + root.toString());
-    this.root = root.resolve(now());
+    this.root = root;
   }
 
   @Override
@@ -38,7 +31,7 @@ public class FilesystemBackupTarget implements BackupTarget {
 
   @Override
   public void backup(Resource r, IOConsumer<Id> k) throws IOException {
-    Path dst = Paths.get(root.toString(), r.path().toAbsolutePath().toString());
+    Path dst = root.resolve(UUID.randomUUID().toString());
     if (Files.exists(dst)) {
       throw new IOException("refusing to overwrite " + dst);
     }

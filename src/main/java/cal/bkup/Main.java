@@ -2,8 +2,8 @@ package cal.bkup;
 
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.EncryptedInputStream;
-import cal.bkup.impls.FilesystemBackupTarget;
-import cal.bkup.impls.LocalDirectory;
+import cal.bkup.impls.GlacierBackupTarget;
+import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.XZCompressedDirectory;
 import cal.bkup.types.BackupTarget;
@@ -44,10 +44,14 @@ import java.util.stream.Collectors;
 
 public class Main {
 
+  private static final String AWS_REGION = "us-east-2";
   private static final String GLACIER_VAULT_NAME = "mybackups";
-  private static final String GLACIER_ENDPOINT = "glacier.us-east-2.amazonaws.com";
+  private static final String GLACIER_ENDPOINT = "glacier." + AWS_REGION + ".amazonaws.com";
+  private static final String S3_BUCKET = "backupindex";
+  private static final String S3_ENDPOINT = "s3." + AWS_REGION + ".amazonaws.com";
   private static final int BACKLOG_CAPACITY = 8;
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
+  private static final Id SYSTEM_ID = new Id("UWLaptop");
   private static final List<String> RULES = Arrays.asList(
 //      "+ ~/Documents",
 //      "+ ~/sources",
@@ -76,21 +80,20 @@ public class Main {
   public static void main(String[] args) throws Exception {
     Console cons;
     char[] passwd;
-//    if ((cons = System.console()) != null &&
-//        (passwd = cons.readPassword("[%s]", "Password:")) != null) {
-    if ((passwd = "hahahahahahahah".toCharArray()) != null) {
+    if ((cons = System.console()) != null &&
+        (passwd = readPassword(cons)) != null) {
       String password = new String(passwd);
       try (Checkpoint checkpoint = findMostRecentCheckpoint(password);
            BackupTarget target = target(password, checkpoint)) {
         System.out.println("Backup started");
         forEachFile(resource -> {
-          System.out.println("--> " + resource.path());
           target.backup(resource,
               id -> {
+                System.out.println("--> " + resource.path());
                 checkpoint.noteSuccessfulBackup(resource, target, id);
                 synchronized (checkpoint) {
                   Instant lastSave = checkpoint.lastSave();
-                  if (lastSave == null || lastSave.compareTo(Instant.now().minus(15, ChronoUnit.MINUTES)) < 0) {
+                  if (lastSave == null || lastSave.compareTo(Instant.now().minus(5, ChronoUnit.MINUTES)) < 0) {
                     checkpoint.save();
                   }
                 }
@@ -102,10 +105,23 @@ public class Main {
     }
   }
 
+  private static char[] readPassword(Console cons) {
+    char[] c1 = cons.readPassword("[%s]", "Password:");
+    if (c1 == null) return null;
+    char[] c2 = cons.readPassword("[%s]", "Confirm:");
+    if (c2 == null) return null;
+    if (!Arrays.equals(c1, c2)) {
+      System.err.println("passwords do not match");
+      return null;
+    }
+    return c1;
+  }
+
   private static Checkpoint findMostRecentCheckpoint(String password) throws IOException {
     try {
-      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(LocalDirectory.TMP), password);
-//      SimpleDirectory dir = new EncryptedDirectory(LocalDirectory.TMP, password);
+//      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(LocalDirectory.TMP), password);
+//      SimpleDirectory dir = LocalDirectory.TMP;
+      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT)), password);
       return new SqliteCheckpoint(dir);
     } catch (SQLException e) {
       throw new IOException(e);
@@ -113,8 +129,8 @@ public class Main {
   }
 
   private static BackupTarget target(String password, Checkpoint checkpoint) throws GeneralSecurityException, UnsupportedEncodingException {
-    BackupTarget baseTarget = new FilesystemBackupTarget(Paths.get("/tmp/bkup"));
-//    BackupTarget baseTarget = new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
+//    BackupTarget baseTarget = new FilesystemBackupTarget(Paths.get("/tmp/bkup"));
+    BackupTarget baseTarget = new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
     return checkModTime(bufferTarget(encryptTarget(baseTarget, password)), checkpoint);
   }
 
@@ -127,7 +143,7 @@ public class Main {
 
       @Override
       public void backup(Resource r, IOConsumer<Id> k) throws IOException {
-        Instant checkpointModTime = checkpoint.modTime(r);
+        Instant checkpointModTime = checkpoint.modTime(r, backupTarget);
         if (checkpointModTime == null || r.modTime().compareTo(checkpointModTime) > 0) {
           backupTarget.backup(r, k);
         } else {
@@ -152,6 +168,11 @@ public class Main {
       @Override
       public void backup(Resource r, IOConsumer<Id> k) throws IOException {
         backupTarget.backup(new Resource() {
+          @Override
+          public Id system() {
+            return r.system();
+          }
+
           @Override
           public Path path() {
             return r.path();
@@ -295,6 +316,11 @@ public class Main {
                 path -> {
                   if (paths.add(path)) {
                     consumer.accept(new Resource() {
+                      @Override
+                      public Id system() {
+                        return SYSTEM_ID;
+                      }
+
                       @Override
                       public Path path() {
                         return path;
