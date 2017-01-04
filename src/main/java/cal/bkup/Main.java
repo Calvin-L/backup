@@ -46,6 +46,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -321,14 +323,18 @@ public class Main {
     BlockingQueue<IOConsumer<Void>> jobs = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
 
     Thread[] threads = new Thread[NTHREADS];
+    AtomicBoolean run = new AtomicBoolean(true);
     for (int i = 0; i < NTHREADS; ++i) {
       threads[i] = new Thread(() -> {
-        while (true) {
+        while (run.get() || !jobs.isEmpty()) {
           IOConsumer<Void> job;
           try {
-            job = jobs.take();
+            job = jobs.poll(1, TimeUnit.SECONDS);
           } catch (InterruptedException e) {
             break;
+          }
+          if (job == null) {
+            continue;
           }
           try {
             job.accept(null);
@@ -360,8 +366,8 @@ public class Main {
 
       @Override
       public void close() throws Exception {
-        System.out.println("shutting down worker threads");
-        for (Thread t : threads) { t.interrupt(); }
+        System.out.println("joining worker threads");
+        run.set(false);
         for (Thread t : threads) {
           try {
             t.join();
