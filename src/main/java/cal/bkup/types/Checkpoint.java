@@ -2,6 +2,7 @@ package cal.bkup.types;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.stream.Stream;
 
 public interface Checkpoint extends AutoCloseable {
 
@@ -14,12 +15,14 @@ public interface Checkpoint extends AutoCloseable {
   Instant lastSave();
 
   void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException;
+  void noteSymLink(Id system, SymLink link) throws IOException;
 
   void save() throws IOException;
 
+  Stream<ResourceInfo> list() throws IOException;
+
   @Override
   default void close() throws Exception {
-    save();
   }
 
 }

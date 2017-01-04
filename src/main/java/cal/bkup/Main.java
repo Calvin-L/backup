@@ -11,8 +11,16 @@ import cal.bkup.types.Checkpoint;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
+import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.SimpleDirectory;
-import com.amazonaws.services.kms.model.UnsupportedOperationException;
+import cal.bkup.types.SymLink;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.OptionGroup;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 
 import java.io.Console;
 import java.io.FileInputStream;
@@ -41,6 +49,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Main {
 
@@ -77,35 +86,142 @@ public class Main {
       "- .Trashes",
       "- Thumbs.db");
 
+  private static void showHelp(Options options) {
+    new HelpFormatter().printHelp("backup [options]", options);
+  }
+
   public static void main(String[] args) throws Exception {
+    Options options = new Options();
+    options.addOption("h", "help", false, "Show help and quit");
+
+    OptionGroup action = new OptionGroup();
+    action.addOption(new Option("d", "dry-run", false, "Show what would be done"));
+    action.addOption(new Option("l", "list", false, "Show inventory of current backup"));
+    options.addOptionGroup(action);
+
+    CommandLine cli;
+    try {
+      cli = new DefaultParser().parse(options, args);
+    } catch (ParseException e) {
+      System.err.println("Failed to parse options: " + e);
+      showHelp(options);
+      System.exit(1);
+      return;
+    }
+
+    if (cli.hasOption('h')) {
+      showHelp(options);
+      return;
+    }
+
+    boolean dryRun = cli.hasOption('d');
+    boolean list = cli.hasOption('l');
+
     Console cons;
-    char[] passwd;
+    String password;
     if ((cons = System.console()) != null &&
-        (passwd = readPassword(cons)) != null) {
-      String password = new String(passwd);
-      try (Checkpoint checkpoint = findMostRecentCheckpoint(password);
-           BackupTarget target = target(password, checkpoint)) {
-        System.out.println("Backup started");
-        forEachFile(resource -> {
-          target.backup(resource,
-              id -> {
-                System.out.println("--> " + resource.path());
-                checkpoint.noteSuccessfulBackup(resource, target, id);
-                synchronized (checkpoint) {
-                  Instant lastSave = checkpoint.lastSave();
-                  if (lastSave == null || lastSave.compareTo(Instant.now().minus(5, ChronoUnit.MINUTES)) < 0) {
-                    checkpoint.save();
-                  }
-                }
-              });
-        });
+        (password = readPassword(cons)) != null) {
+      if (list) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password)) {
+          checkpoint.list().forEach(info -> {
+            System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
+          });
+        }
+      } else {
+        try (Checkpoint checkpoint = dryRun ? dummyCheckpoint(password) : findMostRecentCheckpoint(password);
+             BackupTarget target = dryRun ? dummyTarget(password, checkpoint) : target(password, checkpoint)) {
+          System.out.println("Backup started");
+          try {
+            forEachFile(
+                symlink -> {
+                  System.out.println("Symlink: " + symlink.src() + " --> " + symlink.dst());
+                  checkpoint.noteSymLink(SYSTEM_ID, symlink);
+                },
+                resource -> {
+                  System.out.println("Backing up " + resource.path().getFileName());
+                  target.backup(resource,
+                      id -> {
+                        System.out.println("Finished " + resource.path());
+                        checkpoint.noteSuccessfulBackup(resource, target, id);
+                        synchronized (checkpoint) {
+                          Instant lastSave = checkpoint.lastSave();
+                          if (lastSave == null || lastSave.compareTo(Instant.now().minus(5, ChronoUnit.MINUTES)) < 0) {
+                            checkpoint.save();
+                          }
+                        }
+                      });
+                });
+          } finally {
+            checkpoint.save();
+          }
+        }
       }
     } else {
       throw new Exception("failed to get password");
     }
   }
 
-  private static char[] readPassword(Console cons) {
+  private static BackupTarget dummyTarget(String password, Checkpoint checkpoint) throws GeneralSecurityException, UnsupportedEncodingException {
+    BackupTarget target = target(password, checkpoint);
+    return new BackupTarget() {
+      @Override
+      public Id name() {
+        return target.name();
+      }
+
+      @Override
+      public void backup(Resource r, IOConsumer<Id> k) throws IOException {
+        k.accept(null);
+      }
+
+      @Override
+      public void close() throws Exception {
+        target.close();
+      }
+    };
+  }
+
+  private static Checkpoint dummyCheckpoint(String password) throws IOException {
+    Checkpoint chk = findMostRecentCheckpoint(password);
+    return new Checkpoint() {
+      @Override
+      public Instant modTime(Resource r, BackupTarget target) {
+        return chk.modTime(r, target);
+      }
+
+      @Override
+      public Instant lastSave() {
+        return chk.lastSave();
+      }
+
+      @Override
+      public void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException {
+        // nop
+      }
+
+      @Override
+      public void noteSymLink(Id system, SymLink link) throws IOException {
+        chk.noteSymLink(system, link);
+      }
+
+      @Override
+      public void save() throws IOException {
+        // nop
+      }
+
+      @Override
+      public Stream<ResourceInfo> list() throws IOException {
+        return chk.list();
+      }
+
+      @Override
+      public void close() throws Exception {
+        chk.close();
+      }
+    };
+  }
+
+  private static String readPassword(Console cons) {
     char[] c1 = cons.readPassword("[%s]", "Password:");
     if (c1 == null) return null;
     char[] c2 = cons.readPassword("[%s]", "Confirm:");
@@ -114,7 +230,7 @@ public class Main {
       System.err.println("passwords do not match");
       return null;
     }
-    return c1;
+    return new String(c1);
   }
 
   private static Checkpoint findMostRecentCheckpoint(String password) throws IOException {
@@ -147,7 +263,7 @@ public class Main {
         if (checkpointModTime == null || r.modTime().compareTo(checkpointModTime) > 0) {
           backupTarget.backup(r, k);
         } else {
-          System.out.println("skipping " + r.path());
+          System.out.println("Skipping " + r.path());
         }
       }
 
@@ -262,12 +378,10 @@ public class Main {
     e.printStackTrace();
   }
 
-  private static class Visitor implements FileVisitor<Path> {
-    private final IOConsumer<Path> consumer;
+  private static abstract class Visitor implements FileVisitor<Path> {
     private List<PathMatcher> exclusionRules;
 
-    public Visitor(IOConsumer<Path> consumer, List<PathMatcher> exclusionRules) {
-      this.consumer = consumer;
+    public Visitor(List<PathMatcher> exclusionRules) {
       this.exclusionRules = exclusionRules;
     }
 
@@ -278,11 +392,13 @@ public class Main {
 
     @Override
     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-      if (attrs.isSymbolicLink()) {
-        throw new UnsupportedOperationException("cannot handle symlinks yet");
-      }
       if (exclusionRules.stream().allMatch(r -> !r.matches(file) && !r.matches(file.getFileName()))) {
-        consumer.accept(file);
+        if (attrs.isSymbolicLink()) {
+          Path dst = Files.readSymbolicLink(file);
+          onSymLink(file, dst);
+        } else {
+          onFile(file);
+        }
       }
       return FileVisitResult.CONTINUE;
     }
@@ -297,9 +413,12 @@ public class Main {
     public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
       return FileVisitResult.CONTINUE;
     }
+
+    protected abstract void onFile(Path file) throws IOException;
+    protected abstract void onSymLink(Path src, Path dst) throws IOException;
   }
 
-  private static void forEachFile(IOConsumer<Resource> consumer) throws IOException {
+  private static void forEachFile(IOConsumer<SymLink> symlinkConsumer, IOConsumer<Resource> consumer) throws IOException {
     Collection<Path> paths = new LinkedHashSet<>();
 
     Pattern p = Pattern.compile("^(.) (.*)$");
@@ -313,34 +432,53 @@ public class Main {
           case '+':
             rule = rule.replace("~", System.getProperty("user.home"));
             Files.walkFileTree(Paths.get(rule), new Visitor(
-                path -> {
-                  if (paths.add(path)) {
-                    consumer.accept(new Resource() {
-                      @Override
-                      public Id system() {
-                        return SYSTEM_ID;
-                      }
-
-                      @Override
-                      public Path path() {
-                        return path;
-                      }
-                      @Override
-                      public Instant modTime() throws IOException {
-                        return Files.getLastModifiedTime(path).toInstant();
-                      }
-
-                      @Override
-                      public InputStream open() throws IOException {
-                        return new FileInputStream(path().toString());
-                      }
-                    });
-                  }
-                },
                 RULES.subList(i + 1, RULES.size()).stream()
                     .filter(rr -> rr.startsWith("-"))
                     .map(rr -> { Matcher mm = p.matcher(rr); return mm.find() ? FileSystems.getDefault().getPathMatcher("glob:" + mm.group(2)) : Util.fail(); })
-                    .collect(Collectors.toList())));
+                    .collect(Collectors.toList())) {
+              @Override
+              protected void onFile(Path path) throws IOException {
+                if (paths.add(path)) {
+                  consumer.accept(new Resource() {
+                    @Override
+                    public Id system() {
+                      return SYSTEM_ID;
+                    }
+
+                    @Override
+                    public Path path() {
+                      return path;
+                    }
+                    @Override
+                    public Instant modTime() throws IOException {
+                      return Files.getLastModifiedTime(path).toInstant();
+                    }
+
+                    @Override
+                    public InputStream open() throws IOException {
+                      return new FileInputStream(path().toString());
+                    }
+                  });
+                }
+              }
+
+              @Override
+              protected void onSymLink(Path src, Path dst) throws IOException {
+                if (paths.add(src)) {
+                  symlinkConsumer.accept(new SymLink() {
+                    @Override
+                    public Path src() {
+                      return src;
+                    }
+
+                    @Override
+                    public Path dst() {
+                      return dst;
+                    }
+                  });
+                }
+              }
+            });
             break;
           case '-':
             break;

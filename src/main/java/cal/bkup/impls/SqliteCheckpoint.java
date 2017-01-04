@@ -5,7 +5,9 @@ import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
+import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.SimpleDirectory;
+import cal.bkup.types.SymLink;
 
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
@@ -15,6 +17,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -22,9 +25,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.OptionalLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
@@ -36,6 +42,8 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private Connection conn;
   private PreparedStatement queryModTime;
   private PreparedStatement insertFileRecord;
+  private PreparedStatement queryAll;
+  private PreparedStatement insertSymLink;
 
   public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
     dir = location;
@@ -112,13 +120,22 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     }
   }
 
+  @Override
+  public synchronized void noteSymLink(Id system, SymLink link) throws IOException {
+    try {
+      insertSymLink.setString(1, system.toString());
+      insertSymLink.setString(2, link.src().toString());
+      insertSymLink.setString(3, link.dst().toString());
+      insertSymLink.executeUpdate();
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+  }
+
   protected synchronized void save(boolean reopen) throws IOException, SQLException {
     long timestamp = Instant.now().toEpochMilli();
     System.out.println("Saving checkpoint [" + timestamp + ']');
-    conn.commit();
-    if (queryModTime != null) { queryModTime.close(); queryModTime = null; }
-    if (insertFileRecord != null) { insertFileRecord.close(); insertFileRecord = null; }
-    if (conn != null) { conn.close(); conn = null; }
+    close();
     try (InputStream reader = new FileInputStream(file.toString());
          OutputStream writer = dir.createOrReplace(timestamp + EXTENSION)) {
       Util.copyStream(reader, writer);
@@ -138,8 +155,59 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
+  public Stream<ResourceInfo> list() throws IOException {
+    List<ResourceInfo> res = new ArrayList<>();
+
+    try {
+      try (ResultSet rs = queryAll.executeQuery()) {
+        while (rs.next()) {
+          Id sys = new Id(rs.getString("system"));
+          Path file = Paths.get(rs.getString("file"));
+          Id target = new Id(rs.getString("target"));
+          Id id = new Id(rs.getString("id"));
+          long ms = rs.getLong("ms_since_unix_epoch");
+          Instant time = Instant.ofEpochMilli(ms);
+          res.add(new ResourceInfo() {
+            @Override
+            public Id system() {
+              return sys;
+            }
+
+            @Override
+            public Path path() {
+              return file;
+            }
+
+            @Override
+            public Instant modTime() {
+              return time;
+            }
+
+            @Override
+            public Id target() {
+              return target;
+            }
+
+            @Override
+            public Id idAtTarget() {
+              return id;
+            }
+          });
+        }
+      }
+    } catch (SQLException e) {
+      throw new RuntimeException(e);
+    }
+
+    return res.stream();
+  }
+
+  @Override
   public void close() throws IOException, SQLException {
-    save(false);
+    conn.commit();
+    if (queryModTime != null) { queryModTime.close(); queryModTime = null; }
+    if (insertFileRecord != null) { insertFileRecord.close(); insertFileRecord = null; }
+    if (conn != null) { conn.close(); conn = null; }
   }
 
   private void reopen() throws IOException, SQLException {
@@ -150,11 +218,15 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     try (Statement init = conn.createStatement()) {
       init.execute("CREATE TABLE IF NOT EXISTS files (system TEXT, file TEXT, ms_since_unix_epoch INT, target TEXT, id TEXT)");
       init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_idx ON files (system, file, target)");
+      init.execute("CREATE TABLE IF NOT EXISTS symlinks (system TEXT, src TEXT, dst TEXT)");
+      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS symlink_idx ON symlinks (system, src)");
     }
     conn.commit();
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
-    insertFileRecord = conn.prepareStatement("INSERT INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
+    queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files");
+    insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
+    insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
 
   }
 
