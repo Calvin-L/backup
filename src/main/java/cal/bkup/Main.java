@@ -1,5 +1,7 @@
 package cal.bkup;
 
+import cal.bkup.impls.DummyCheckpoint;
+import cal.bkup.impls.DummyTarget;
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.GlacierBackupTarget;
@@ -11,7 +13,6 @@ import cal.bkup.types.Checkpoint;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
-import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 import org.apache.commons.cli.CommandLine;
@@ -48,10 +49,10 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class Main {
 
@@ -87,6 +88,12 @@ public class Main {
       "- .Spotlight-V100",
       "- .Trashes",
       "- Thumbs.db");
+
+  private enum UseDummy { USE_DUMMY, USE_REAL };
+
+  private static final AtomicLong numBackedUp = new AtomicLong(0);
+  private static final AtomicLong numSkipped = new AtomicLong(0);
+  private static final AtomicLong numErrs = new AtomicLong(0);
 
   private static void showHelp(Options options) {
     new HelpFormatter().printHelp("backup [options]", options);
@@ -124,7 +131,7 @@ public class Main {
     if ((cons = System.console()) != null &&
         (password = readPassword(cons)) != null) {
       if (list) {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password)) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, UseDummy.USE_DUMMY)) {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
@@ -133,8 +140,8 @@ public class Main {
           });
         }
       } else {
-        try (Checkpoint checkpoint = dryRun ? dummyCheckpoint(password) : findMostRecentCheckpoint(password);
-             BackupTarget target = dryRun ? dummyTarget(password, checkpoint) : target(password, checkpoint)) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL);
+             BackupTarget target = getBackupTarget(password, checkpoint, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL)) {
           System.out.println("Backup started");
           try {
             forEachFile(
@@ -146,6 +153,7 @@ public class Main {
                   System.out.println("Backing up " + resource.path().getFileName());
                   target.backup(resource,
                       id -> {
+                        numBackedUp.incrementAndGet();
                         System.out.println("Finished " + resource.path());
                         checkpoint.noteSuccessfulBackup(resource, target, id);
                         synchronized (checkpoint) {
@@ -157,78 +165,17 @@ public class Main {
                       });
                 });
           } finally {
-            checkpoint.save();
+            long nbkup = numBackedUp.get();
+            System.out.println(nbkup + " backed up, " + numSkipped + " skipped, " + numErrs + " errors");
+            if (nbkup > 0L) {
+              checkpoint.save();
+            }
           }
         }
       }
     } else {
       throw new Exception("failed to get password");
     }
-  }
-
-  private static BackupTarget dummyTarget(String password, Checkpoint checkpoint) throws GeneralSecurityException, UnsupportedEncodingException {
-    BackupTarget target = target(password, checkpoint);
-    return new BackupTarget() {
-      @Override
-      public Id name() {
-        return target.name();
-      }
-
-      @Override
-      public void backup(Resource r, IOConsumer<Id> k) throws IOException {
-        k.accept(null);
-      }
-
-      @Override
-      public void close() throws Exception {
-        target.close();
-      }
-    };
-  }
-
-  private static Checkpoint dummyCheckpoint(String password) throws IOException {
-    Checkpoint chk = findMostRecentCheckpoint(password);
-    return new Checkpoint() {
-      @Override
-      public Instant modTime(Resource r, BackupTarget target) {
-        return chk.modTime(r, target);
-      }
-
-      @Override
-      public Instant lastSave() {
-        return chk.lastSave();
-      }
-
-      @Override
-      public void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException {
-        // nop
-      }
-
-      @Override
-      public void noteSymLink(Id system, SymLink link) throws IOException {
-        chk.noteSymLink(system, link);
-      }
-
-      @Override
-      public void save() throws IOException {
-        // nop
-      }
-
-      @Override
-      public Stream<ResourceInfo> list() throws IOException {
-        return chk.list();
-      }
-
-      @Override
-      public Stream<SymLink> symlinks() throws IOException {
-        return chk.symlinks();
-      }
-
-      @Override
-      public void close() throws Exception {
-        chk.close();
-      }
-    };
   }
 
   private static String readPassword(Console cons) {
@@ -243,20 +190,23 @@ public class Main {
     return new String(c1);
   }
 
-  private static Checkpoint findMostRecentCheckpoint(String password) throws IOException {
+  private static Checkpoint findMostRecentCheckpoint(String password, UseDummy dummy) throws IOException {
     try {
 //      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(LocalDirectory.TMP), password);
 //      SimpleDirectory dir = LocalDirectory.TMP;
       SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT)), password);
-      return new SqliteCheckpoint(dir);
+      Checkpoint res = new SqliteCheckpoint(dir);
+      if (dummy == UseDummy.USE_DUMMY) res = new DummyCheckpoint(res);
+      return res;
     } catch (SQLException e) {
       throw new IOException(e);
     }
   }
 
-  private static BackupTarget target(String password, Checkpoint checkpoint) throws GeneralSecurityException, UnsupportedEncodingException {
+  private static BackupTarget getBackupTarget(String password, Checkpoint checkpoint, UseDummy useDummy) throws GeneralSecurityException, UnsupportedEncodingException {
 //    BackupTarget baseTarget = new FilesystemBackupTarget(Paths.get("/tmp/bkup"));
     BackupTarget baseTarget = new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
+    if (useDummy == UseDummy.USE_DUMMY) baseTarget = new DummyTarget(baseTarget);
     return checkModTime(bufferTarget(encryptTarget(baseTarget, password)), checkpoint);
   }
 
@@ -274,6 +224,7 @@ public class Main {
           backupTarget.backup(r, k);
         } else {
           System.out.println("Skipping " + r.path());
+          numSkipped.incrementAndGet();
         }
       }
 
@@ -389,6 +340,7 @@ public class Main {
   }
 
   private static void onError(Exception e) {
+    numErrs.incrementAndGet();
     e.printStackTrace();
   }
 
