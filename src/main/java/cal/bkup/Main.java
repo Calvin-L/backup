@@ -65,7 +65,6 @@ public class Main {
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
   private static final Id SYSTEM_ID = new Id("UWLaptop");
   private static final List<String> RULES = Arrays.asList(
-//      "+ ~/Documents",
 //      "+ ~/sources",
       "- ~/sources/opensource",
       "- ~/sources/**/build",
@@ -77,10 +76,11 @@ public class Main {
       "- *.glob",
       "- *.pyc",
       "- *.egg",
+      "- .stack-work",
+      "+ ~/Documents",
       "+ ~/xfer",
       "- ~/xfer/penlinux.img",
       "+ ~/.bash_profile",
-      "- .stack-work",
       "- *.log",
       "+ ~/Pictures",
       "- .DS_Store",

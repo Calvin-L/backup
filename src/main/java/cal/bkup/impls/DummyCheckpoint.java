@@ -31,12 +31,12 @@ public class DummyCheckpoint implements Checkpoint {
 
   @Override
   public void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException {
-    wrapped.noteSuccessfulBackup(r, target, asId);
+    // nop
   }
 
   @Override
   public void noteSymLink(Id system, SymLink link) throws IOException {
-    wrapped.noteSymLink(system, link);
+    // nop
   }
 
   @Override
