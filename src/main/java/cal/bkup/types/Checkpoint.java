@@ -20,6 +20,7 @@ public interface Checkpoint extends AutoCloseable {
   void save() throws IOException;
 
   Stream<ResourceInfo> list() throws IOException;
+  Stream<SymLink> symlinks() throws IOException;
 
   @Override
   default void close() throws Exception {

@@ -128,6 +128,9 @@ public class Main {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
+          checkpoint.symlinks().forEach(link -> {
+            System.out.println("/" + link.src() + " ----> " + link.dst());
+          });
         }
       } else {
         try (Checkpoint checkpoint = dryRun ? dummyCheckpoint(password) : findMostRecentCheckpoint(password);
@@ -214,6 +217,11 @@ public class Main {
       @Override
       public Stream<ResourceInfo> list() throws IOException {
         return chk.list();
+      }
+
+      @Override
+      public Stream<SymLink> symlinks() throws IOException {
+        return chk.symlinks();
       }
 
       @Override

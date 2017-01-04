@@ -76,7 +76,7 @@ public class GlacierBackupTarget implements BackupTarget {
           .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
 
       UploadMultipartPartResult partResult = client.uploadMultipartPart(partRequest);
-      System.out.println("Part uploaded, checksum: " + partResult.getChecksum());
+      System.out.println("Part uploaded [" + r.path().getFileName() + "], checksum: " + partResult.getChecksum());
       total += n;
     }
 

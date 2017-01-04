@@ -44,6 +44,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement insertFileRecord;
   private PreparedStatement queryAll;
   private PreparedStatement insertSymLink;
+  private PreparedStatement queryAllSymlinks;
 
   public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
     dir = location;
@@ -196,7 +197,36 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
         }
       }
     } catch (SQLException e) {
-      throw new RuntimeException(e);
+      throw new IOException(e);
+    }
+
+    return res.stream();
+  }
+
+  @Override
+  public Stream<SymLink> symlinks() throws IOException {
+    List<SymLink> res = new ArrayList<>();
+
+    try {
+      try (ResultSet rs = queryAllSymlinks.executeQuery()) {
+        while (rs.next()) {
+          Path src = Paths.get(rs.getString("src"));
+          Path dst = Paths.get(rs.getString("dst"));
+          res.add(new SymLink() {
+            @Override
+            public Path src() {
+              return src;
+            }
+
+            @Override
+            public Path dst() {
+              return dst;
+            }
+          });
+        }
+      }
+    } catch (SQLException e) {
+      throw new IOException(e);
     }
 
     return res.stream();
@@ -225,6 +255,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files");
+    queryAllSymlinks = conn.prepareStatement("SELECT src, dst FROM symlinks");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
 
