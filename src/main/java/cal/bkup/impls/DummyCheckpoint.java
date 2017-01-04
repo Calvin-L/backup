@@ -2,6 +2,7 @@ package cal.bkup.impls;
 
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
+import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
@@ -40,6 +41,11 @@ public class DummyCheckpoint implements Checkpoint {
   }
 
   @Override
+  public void noteHardLink(Id systemId, HardLink hardlink) {
+    // nop
+  }
+
+  @Override
   public void save() {
     // nop
   }
@@ -52,6 +58,11 @@ public class DummyCheckpoint implements Checkpoint {
   @Override
   public Stream<SymLink> symlinks() throws IOException {
     return wrapped.symlinks();
+  }
+
+  @Override
+  public Stream<HardLink> hardlinks() throws IOException {
+    return wrapped.hardlinks();
   }
 
   @Override

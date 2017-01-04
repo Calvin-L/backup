@@ -16,11 +16,13 @@ public interface Checkpoint extends AutoCloseable {
 
   void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException;
   void noteSymLink(Id system, SymLink link) throws IOException;
+  void noteHardLink(Id systemId, HardLink hardlink) throws IOException;
 
   void save() throws IOException;
 
   Stream<ResourceInfo> list() throws IOException;
   Stream<SymLink> symlinks() throws IOException;
+  Stream<HardLink> hardlinks() throws IOException;
 
   @Override
   default void close() throws Exception {

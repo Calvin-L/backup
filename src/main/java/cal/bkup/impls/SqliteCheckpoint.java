@@ -3,6 +3,7 @@ package cal.bkup.impls;
 import cal.bkup.Util;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
+import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
@@ -45,6 +46,8 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement queryAll;
   private PreparedStatement insertSymLink;
   private PreparedStatement queryAllSymlinks;
+  private PreparedStatement queryAllHardLinks;
+  private PreparedStatement insertHardLink;
 
   public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
     dir = location;
@@ -128,6 +131,18 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
       insertSymLink.setString(2, link.src().toString());
       insertSymLink.setString(3, link.dst().toString());
       insertSymLink.executeUpdate();
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+  }
+
+  @Override
+  public void noteHardLink(Id system, HardLink hardlink) throws IOException {
+    try {
+      insertHardLink.setString(1, system.toString());
+      insertHardLink.setString(2, hardlink.src().toString());
+      insertHardLink.setString(3, hardlink.dst().toString());
+      insertHardLink.executeUpdate();
     } catch (SQLException e) {
       throw new IOException(e);
     }
@@ -233,10 +248,44 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
+  public Stream<HardLink> hardlinks() throws IOException {
+    List<HardLink> res = new ArrayList<>();
+
+    try {
+      try (ResultSet rs = queryAllHardLinks.executeQuery()) {
+        while (rs.next()) {
+          Path src = Paths.get(rs.getString("src"));
+          Path dst = Paths.get(rs.getString("dst"));
+          res.add(new HardLink() {
+            @Override
+            public Path src() {
+              return src;
+            }
+
+            @Override
+            public Path dst() {
+              return dst;
+            }
+          });
+        }
+      }
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+
+    return res.stream();
+  }
+
+  @Override
   public void close() throws IOException, SQLException {
     conn.commit();
-    if (queryModTime != null) { queryModTime.close(); queryModTime = null; }
     if (insertFileRecord != null) { insertFileRecord.close(); insertFileRecord = null; }
+    if (insertSymLink != null) { insertSymLink.close(); insertSymLink = null; }
+    if (insertHardLink != null) { insertHardLink.close(); insertHardLink = null; }
+    if (queryModTime != null) { queryModTime.close(); queryModTime = null; }
+    if (queryAll != null) { queryAll.close(); queryAll = null; }
+    if (queryAllHardLinks != null) { queryAllHardLinks.close(); queryAllHardLinks = null; }
+    if (queryAllSymlinks != null) { queryAllSymlinks.close(); queryAllSymlinks = null; }
     if (conn != null) { conn.close(); conn = null; }
   }
 
@@ -250,14 +299,18 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
       init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_idx ON files (system, file, target)");
       init.execute("CREATE TABLE IF NOT EXISTS symlinks (system TEXT, src TEXT, dst TEXT)");
       init.execute("CREATE UNIQUE INDEX IF NOT EXISTS symlink_idx ON symlinks (system, src)");
+      init.execute("CREATE TABLE IF NOT EXISTS hardlinks (system TEXT, src TEXT, dst TEXT)");
+      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS hardlink_idx ON hardlinks (system, src)");
     }
     conn.commit();
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files");
     queryAllSymlinks = conn.prepareStatement("SELECT src, dst FROM symlinks");
+    queryAllHardLinks = conn.prepareStatement("SELECT src, dst FROM hardlinks");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
+    insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");
 
   }
 

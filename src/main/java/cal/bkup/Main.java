@@ -10,11 +10,14 @@ import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.XZCompressedDirectory;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
+import cal.bkup.types.HardLink;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
+import jnr.posix.POSIX;
+import jnr.posix.POSIXFactory;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -43,8 +46,10 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.LinkedHashSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -65,23 +70,41 @@ public class Main {
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
   private static final Id SYSTEM_ID = new Id("UWLaptop");
   private static final List<String> RULES = Arrays.asList(
-//      "+ ~/sources",
+      "+ ~/sources",
       "- ~/sources/opensource",
-      "- ~/sources/**/build",
-      "- *.o",
-      "- *.class",
-      "- *.jar",
-      "- *.hi",
-      "- *.vo",
-      "- *.glob",
-      "- *.pyc",
-      "- *.egg",
-      "- .stack-work",
+      "+ ~/website",
+      "- ~/website/output",
+      "- ~/website/cozy/out",
+      "- build",
       "+ ~/Documents",
       "+ ~/xfer",
       "- ~/xfer/penlinux.img",
       "+ ~/.bash_profile",
       "- *.log",
+      "- *.aux",
+      "- *.synctex.gz",
+      "- venv",
+      "- cockerel-env",
+      "- python-env",
+      "- pyenv",
+      "- ~/sources/playground/calmr/py/env",
+      "- *.o",
+      "- *.class",
+      "- *.hi",
+      "- *.vo",
+      "- *.glob",
+      "- *.pyc",
+      "- *.egg",
+      "- *.exe",
+      "- *.dll",
+      "- *.cmo",
+      "- *.cmx",
+      "- *.cma",
+      "- *.cmxs",
+      "- *.cmxa",
+      "- *.d",
+      "- __pycache__",
+      "- .stack-work",
       "+ ~/Pictures",
       "- .DS_Store",
       "- .fseventsd",
@@ -102,6 +125,7 @@ public class Main {
   public static void main(String[] args) throws Exception {
     Options options = new Options();
     options.addOption("h", "help", false, "Show help and quit");
+    options.addOption(new Option("p", "password", true, "Encryption password"));
 
     OptionGroup action = new OptionGroup();
     action.addOption(new Option("d", "dry-run", false, "Show what would be done"));
@@ -126,31 +150,36 @@ public class Main {
     boolean dryRun = cli.hasOption('d');
     boolean list = cli.hasOption('l');
 
-    Console cons;
-    String password;
-    if ((cons = System.console()) != null &&
-        (password = readPassword(cons)) != null) {
+    String password = cli.hasOption('p') ? cli.getOptionValue('p') : readPassword();
+    if (password != null) {
       if (list) {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, UseDummy.USE_DUMMY)) {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
           checkpoint.symlinks().forEach(link -> {
-            System.out.println("/" + link.src() + " ----> " + link.dst());
+            System.out.println("/" + link.src() + " [SOFT] ----> " + link.dst());
+          });
+          checkpoint.hardlinks().forEach(link -> {
+            System.out.println("/" + link.src() + " [HARD] ----> " + link.dst());
           });
         }
       } else {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL);
              BackupTarget target = getBackupTarget(password, checkpoint, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL)) {
-          System.out.println("Backup started");
+          if (!dryRun) System.out.println("Backup started");
           try {
             forEachFile(
                 symlink -> {
                   System.out.println("Symlink: " + symlink.src() + " --> " + symlink.dst());
                   checkpoint.noteSymLink(SYSTEM_ID, symlink);
                 },
+                hardlink -> {
+                  System.out.println("Hard link: " + hardlink.src() + " --> " + hardlink.dst());
+                  checkpoint.noteHardLink(SYSTEM_ID, hardlink);
+                },
                 resource -> {
-                  System.out.println("Backing up " + resource.path().getFileName());
+                  if (!dryRun) System.out.println("Backing up " + resource.path().getFileName());
                   target.backup(resource,
                       id -> {
                         numBackedUp.incrementAndGet();
@@ -178,7 +207,11 @@ public class Main {
     }
   }
 
-  private static String readPassword(Console cons) {
+  private static String readPassword() {
+    Console cons = System.console();
+    if (cons == null) {
+      throw new IllegalStateException("not connected to console");
+    }
     char[] c1 = cons.readPassword("[%s]", "Password:");
     if (c1 == null) return null;
     char[] c2 = cons.readPassword("[%s]", "Confirm:");
@@ -384,8 +417,12 @@ public class Main {
     protected abstract void onSymLink(Path src, Path dst) throws IOException;
   }
 
-  private static void forEachFile(IOConsumer<SymLink> symlinkConsumer, IOConsumer<Resource> consumer) throws IOException {
-    Collection<Path> paths = new LinkedHashSet<>();
+  private static void forEachFile(IOConsumer<SymLink> symlinkConsumer, IOConsumer<HardLink> hardLinkConsumer, IOConsumer<Resource> consumer) throws IOException {
+    Collection<Path> paths = new HashSet<>();
+
+    // TODO: this will work best if we have a deterministic exploration order :/
+    Map<Long, Path> inodes = new HashMap<>();
+    final String home = System.getProperty("user.home");
 
     Pattern p = Pattern.compile("^(.) (.*)$");
     for (int i = 0; i < RULES.size(); ++i) {
@@ -396,35 +433,59 @@ public class Main {
         String rule = m.group(2);
         switch (c) {
           case '+':
-            rule = rule.replace("~", System.getProperty("user.home"));
+            rule = rule.replace("~", home);
             Files.walkFileTree(Paths.get(rule), new Visitor(
                 RULES.subList(i + 1, RULES.size()).stream()
                     .filter(rr -> rr.startsWith("-"))
-                    .map(rr -> { Matcher mm = p.matcher(rr); return mm.find() ? FileSystems.getDefault().getPathMatcher("glob:" + mm.group(2)) : Util.fail(); })
+                    .map(rr -> { Matcher mm = p.matcher(rr); return mm.find() ? mm.group(2) : Util.fail(); })
+                    .map(rtext -> { if (rtext.startsWith("~")) { rtext = rtext.replaceFirst(Pattern.quote("~"), home); } return FileSystems.getDefault().getPathMatcher("glob:" + rtext); })
                     .collect(Collectors.toList())) {
               @Override
               protected void onFile(Path path) throws IOException {
                 if (paths.add(path)) {
-                  consumer.accept(new Resource() {
-                    @Override
-                    public Id system() {
-                      return SYSTEM_ID;
-                    }
+                  POSIX posix = POSIXFactory.getPOSIX();
+                  assert posix.isNative();
 
-                    @Override
-                    public Path path() {
-                      return path;
-                    }
-                    @Override
-                    public Instant modTime() throws IOException {
-                      return Files.getLastModifiedTime(path).toInstant();
-                    }
+                  long inode = posix.stat(path.toString()).ino();
 
-                    @Override
-                    public InputStream open() throws IOException {
-                      return new FileInputStream(path().toString());
-                    }
-                  });
+                  Path preexisting = inodes.get(inode);
+
+                  if (preexisting != null) {
+                    hardLinkConsumer.accept(new HardLink() {
+                      @Override
+                      public Path src() {
+                        return path;
+                      }
+
+                      @Override
+                      public Path dst() {
+                        return preexisting;
+                      }
+                    });
+                  } else {
+                    inodes.put(inode, path);
+                    consumer.accept(new Resource() {
+                      @Override
+                      public Id system() {
+                        return SYSTEM_ID;
+                      }
+
+                      @Override
+                      public Path path() {
+                        return path;
+                      }
+
+                      @Override
+                      public Instant modTime() throws IOException {
+                        return Files.getLastModifiedTime(path).toInstant();
+                      }
+
+                      @Override
+                      public InputStream open() throws IOException {
+                        return new FileInputStream(path().toString());
+                      }
+                    });
+                  }
                 }
               }
 
