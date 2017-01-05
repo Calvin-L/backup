@@ -15,11 +15,14 @@ import com.amazonaws.services.glacier.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.glacier.model.CreateVaultRequest;
 import com.amazonaws.services.glacier.model.InitiateMultipartUploadRequest;
 import com.amazonaws.services.glacier.model.InitiateMultipartUploadResult;
+import com.amazonaws.services.glacier.model.UploadArchiveRequest;
+import com.amazonaws.services.glacier.model.UploadArchiveResult;
 import com.amazonaws.services.glacier.model.UploadMultipartPartRequest;
 import com.amazonaws.services.glacier.model.UploadMultipartPartResult;
 import com.amazonaws.util.BinaryUtils;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -65,6 +68,48 @@ public class GlacierBackupTarget implements BackupTarget {
     int chunkSize = 4 * 1024 * 1024; // 4mb
     long nbytes = r.sizeEstimateInBytes();
 
+    if (nbytes <= chunkSize * 2) {
+      return new Op<Id>() {
+        @Override
+        public Price cost() {
+          return () -> PENNIES_PER_UPLOAD_REQ;
+        }
+
+        @Override
+        public Price monthlyMaintenanceCost() {
+          return () -> PENNIES_PER_GB_MONTH.multiply(new BigDecimal(nbytes).add(EXTRA_BYTES_PER_ARCHIVE)).divide(ONE_GB);
+        }
+
+        @Override
+        public long estimatedDataTransfer() {
+          return nbytes;
+        }
+
+        @Override
+        public Id exec() throws IOException {
+          ByteArrayOutputStream buf = new ByteArrayOutputStream();
+          try (InputStream in = r.open()) {
+            Util.copyStream(in, buf);
+          }
+          byte[] bytes = buf.toByteArray();
+
+          String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(bytes));
+          UploadArchiveRequest req = new UploadArchiveRequest()
+              .withVaultName(vaultName)
+              .withChecksum(checksum)
+              .withContentLength((long)bytes.length)
+              .withBody(new ByteArrayInputStream(bytes));
+          UploadArchiveResult res = client.uploadArchive(req);
+          return new Id(res.getArchiveId());
+        }
+
+        @Override
+        public String toString() {
+          return r.path().toString();
+        }
+      };
+    }
+
     return new Op<Id>() {
       @Override
       public Price cost() {
@@ -93,21 +138,22 @@ public class GlacierBackupTarget implements BackupTarget {
         String id = init.getUploadId();
 
         long total = 0;
-        InputStream in = r.open();
-        int n;
-        while ((n = readChunk(in, chunk)) > 0) {
-          String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
-          binaryChecksums.add(BinaryUtils.fromHex(checksum));
-          UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
-              .withVaultName(vaultName)
-              .withUploadId(id)
-              .withBody(new ByteArrayInputStream(chunk, 0, n))
-              .withChecksum(checksum)
-              .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
+        try (InputStream in = r.open()) {
+          int n;
+          while ((n = readChunk(in, chunk)) > 0) {
+            String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
+            binaryChecksums.add(BinaryUtils.fromHex(checksum));
+            UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
+                .withVaultName(vaultName)
+                .withUploadId(id)
+                .withBody(new ByteArrayInputStream(chunk, 0, n))
+                .withChecksum(checksum)
+                .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
 
-          UploadMultipartPartResult partResult = client.uploadMultipartPart(partRequest);
-          System.out.println("Part uploaded [" + r.path().getFileName() + "], checksum: " + partResult.getChecksum());
-          total += n;
+            UploadMultipartPartResult partResult = client.uploadMultipartPart(partRequest);
+            System.out.println("Part uploaded [" + r.path().getFileName() + "], checksum: " + partResult.getChecksum());
+            total += n;
+          }
         }
 
         String checksum = TreeHashGenerator.calculateTreeHash(binaryChecksums);
@@ -118,7 +164,7 @@ public class GlacierBackupTarget implements BackupTarget {
             .withArchiveSize(Long.toString(total));
 
         CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
-        return new Id(compResult.getLocation());
+        return new Id(compResult.getArchiveId());
       }
 
       @Override
