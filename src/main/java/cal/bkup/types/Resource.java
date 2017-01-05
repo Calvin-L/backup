@@ -10,4 +10,5 @@ public interface Resource {
   Path path();
   Instant modTime() throws IOException;
   InputStream open() throws IOException;
+  long sizeEstimateInBytes() throws IOException;
 }

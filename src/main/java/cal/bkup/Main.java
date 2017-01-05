@@ -1,7 +1,6 @@
 package cal.bkup;
 
 import cal.bkup.impls.DummyCheckpoint;
-import cal.bkup.impls.DummyTarget;
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.GlacierBackupTarget;
@@ -13,6 +12,8 @@ import cal.bkup.types.Checkpoint;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
+import cal.bkup.types.Op;
+import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
@@ -29,7 +30,6 @@ import org.apache.commons.cli.ParseException;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InterruptedIOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -43,20 +43,24 @@ import java.security.GeneralSecurityException;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Main {
 
@@ -69,13 +73,14 @@ public class Main {
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
   private static final Id SYSTEM_ID = new Id("UWLaptop");
   private static final List<String> RULES = Arrays.asList(
-      "+ ~/sources",
+//      "+ ~/sources",
       "- ~/sources/opensource",
       "+ ~/website",
       "- ~/website/output",
       "- ~/website/cozy/out",
       "- build",
-      "+ ~/Documents",
+      "- _build",
+//      "+ ~/Documents",
       "+ ~/xfer",
       "- ~/xfer/penlinux.img",
       "+ ~/.bash_profile",
@@ -125,6 +130,11 @@ public class Main {
     new HelpFormatter().printHelp("backup [options]", options);
   }
 
+  private static String formatPrice(Price p) {
+    long pennies = p.valueInCents().longValue();
+    return "$" + (pennies / 100) + '.' + (pennies % 100 / 10) + (pennies % 100 % 10);
+  }
+
   public static void main(String[] args) throws Exception {
     Options options = new Options();
     options.addOption("h", "help", false, "Show help and quit");
@@ -152,8 +162,8 @@ public class Main {
 
     boolean dryRun = cli.hasOption('d');
     boolean list = cli.hasOption('l');
-
     String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
+
     if (password != null) {
       if (list) {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, UseDummy.USE_DUMMY)) {
@@ -169,38 +179,62 @@ public class Main {
         }
       } else {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL);
-             BackupTarget target = getBackupTarget(password, checkpoint, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL)) {
-          if (!dryRun) System.out.println("Backup started");
-          try {
-            forEachFile(
-                symlink -> {
-                  System.out.println("Symlink: " + symlink.src() + " --> " + symlink.dst());
-                  checkpoint.noteSymLink(SYSTEM_ID, symlink);
-                },
-                hardlink -> {
-                  System.out.println("Hard link: " + hardlink.src() + " --> " + hardlink.dst());
-                  checkpoint.noteHardLink(SYSTEM_ID, hardlink);
-                },
-                resource -> {
-                  if (!dryRun) System.out.println("Backing up " + resource.path().getFileName());
-                  target.backup(resource,
-                      id -> {
-                        numBackedUp.incrementAndGet();
-                        System.out.println("Finished " + resource.path());
-                        checkpoint.noteSuccessfulBackup(resource, target, id);
-                        synchronized (checkpoint) {
-                          Instant lastSave = checkpoint.lastSave();
-                          if (lastSave == null || lastSave.compareTo(Instant.now().minus(5, ChronoUnit.MINUTES)) < 0) {
-                            checkpoint.save();
-                          }
-                        }
-                      });
+             BackupTarget target = getBackupTarget(password, checkpoint)) {
+
+          System.out.println("Planning...");
+          List<Op<?>> plan = planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList());
+
+          System.out.println("Estimating costs...");
+          long bytesXferred = plan.stream().mapToLong(Op::estimatedDataTransfer).sum();
+          Price cost = plan.stream().map(Op::cost).reduce(Price.ZERO, Price::plus);
+          Price maint = plan.stream().map(Op::monthlyMaintenanceCost).reduce(Price.ZERO, Price::plus);
+
+          System.out.println("Execution plan:");
+          System.out.println("    #ops: " + plan.size());
+          System.out.println("    xfer: ~" + bytesXferred / 1024 / 1024 + " Mb");
+          System.out.println("    cost: ~" + formatPrice(cost));
+          System.out.println("    maint: ~" + formatPrice(maint));
+          System.out.println("-----------------------------------------");
+
+          if (!dryRun) {
+            try {
+              BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
+              ExecutorService executor = new ThreadPoolExecutor(
+                  NTHREADS, NTHREADS,
+                  Long.MAX_VALUE, TimeUnit.SECONDS,
+                  queue,
+                  new ThreadPoolExecutor.CallerRunsPolicy());
+
+              AtomicLong done = new AtomicLong(0);
+
+              for (Op<?> op : plan) {
+                System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
+                executor.execute(() -> {
+                  try {
+                    op.exec();
+                    long ndone = done.incrementAndGet();
+                    System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
+                    numBackedUp.incrementAndGet();
+                    synchronized (checkpoint) {
+                      Instant lastSave = checkpoint.lastSave();
+                      if (lastSave == null || lastSave.compareTo(Instant.now().minus(5, ChronoUnit.MINUTES)) < 0) {
+                        checkpoint.save();
+                      }
+                    }
+                  } catch (Exception e) {
+                    onError(e);
+                  }
                 });
-          } finally {
-            long nbkup = numBackedUp.get();
-            System.out.println(nbkup + " backed up, " + numSkipped + " skipped, " + numErrs + " errors");
-            if (nbkup > 0L) {
-              checkpoint.save();
+              }
+
+              executor.shutdown();
+              executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+            } finally {
+              long nbkup = numBackedUp.get();
+              System.out.println(nbkup + " backed up, " + numSkipped + " skipped, " + numErrs + " errors");
+              if (nbkup > 0L) {
+                checkpoint.save();
+              }
             }
           }
         }
@@ -210,7 +244,101 @@ public class Main {
     }
   }
 
+  private static Stream<Op<?>> planBackup(Id system, Checkpoint checkpoint, BackupTarget target) throws IOException {
+    List<Op<?>> ops = new ArrayList<>();
+    forEachFile(
+        symlink -> ops.add(new Op<Void>() {
+          @Override
+          public Price cost() {
+            return Price.ZERO;
+          }
+
+          @Override
+          public Price monthlyMaintenanceCost() {
+            return Price.ZERO;
+          }
+
+          @Override
+          public long estimatedDataTransfer() {
+            return 0;
+          }
+
+          @Override
+          public Void exec() throws IOException {
+            checkpoint.noteSymLink(system, symlink);
+            return null;
+          }
+
+          @Override
+          public String toString() {
+            return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
+          }
+        }),
+        hardlink -> ops.add(new Op<Void>() {
+          @Override
+          public Price cost() {
+            return Price.ZERO;
+          }
+
+          @Override
+          public Price monthlyMaintenanceCost() {
+            return Price.ZERO;
+          }
+
+          @Override
+          public long estimatedDataTransfer() {
+            return 0;
+          }
+
+          @Override
+          public Void exec() throws IOException {
+            checkpoint.noteHardLink(system, hardlink);
+            return null;
+          }
+
+          @Override
+          public String toString() {
+            return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
+          }
+        }),
+        resource -> {
+          Op<Id> op = target.backup(resource);
+          if (op != null) {
+            ops.add(new Op<Void>() {
+
+              @Override
+              public Price cost() {
+                return op.cost();
+              }
+
+              @Override
+              public Price monthlyMaintenanceCost() {
+                return op.monthlyMaintenanceCost();
+              }
+
+              @Override
+              public long estimatedDataTransfer() {
+                return op.estimatedDataTransfer();
+              }
+
+              @Override
+              public Void exec() throws IOException {
+                checkpoint.noteSuccessfulBackup(resource, target, op.exec());
+                return null;
+              }
+
+              @Override
+              public String toString() {
+                return op.toString();
+              }
+            });
+          }
+        });
+    return ops.stream().filter(Objects::nonNull);
+  }
+
   private static Checkpoint findMostRecentCheckpoint(String password, UseDummy dummy) throws IOException {
+    System.out.println("Fetching checkpoint...");
     try {
 //      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(LocalDirectory.TMP), password);
 //      SimpleDirectory dir = LocalDirectory.TMP;
@@ -223,11 +351,10 @@ public class Main {
     }
   }
 
-  private static BackupTarget getBackupTarget(String password, Checkpoint checkpoint, UseDummy useDummy) throws GeneralSecurityException, UnsupportedEncodingException {
+  private static BackupTarget getBackupTarget(String password, Checkpoint checkpoint) throws GeneralSecurityException, UnsupportedEncodingException {
 //    BackupTarget baseTarget = new FilesystemBackupTarget(Paths.get("/tmp/bkup"));
     BackupTarget baseTarget = new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
-    if (useDummy == UseDummy.USE_DUMMY) baseTarget = new DummyTarget(baseTarget);
-    return checkModTime(bufferTarget(encryptTarget(baseTarget, password)), checkpoint);
+    return checkModTime(encryptTarget(baseTarget, password), checkpoint);
   }
 
   private static BackupTarget checkModTime(BackupTarget backupTarget, Checkpoint checkpoint) {
@@ -238,13 +365,13 @@ public class Main {
       }
 
       @Override
-      public void backup(Resource r, IOConsumer<Id> k) throws IOException {
+      public Op<Id> backup(Resource r) throws IOException {
         Instant checkpointModTime = checkpoint.modTime(r, backupTarget);
         if (checkpointModTime == null || r.modTime().compareTo(checkpointModTime) > 0) {
-          backupTarget.backup(r, k);
+          return backupTarget.backup(r);
         } else {
-          System.out.println("Skipping " + r.path());
           numSkipped.incrementAndGet();
+          return null;
         }
       }
 
@@ -263,8 +390,8 @@ public class Main {
       }
 
       @Override
-      public void backup(Resource r, IOConsumer<Id> k) throws IOException {
-        backupTarget.backup(new Resource() {
+      public Op<Id> backup(Resource r) throws IOException {
+        return backupTarget.backup(new Resource() {
           @Override
           public Id system() {
             return r.system();
@@ -288,72 +415,17 @@ public class Main {
               throw new IOException(e);
             }
           }
-        }, k);
+
+          @Override
+          public long sizeEstimateInBytes() throws IOException {
+            // TODO: can we do better?
+            return r.sizeEstimateInBytes();
+          }
+        });
       }
 
       @Override
       public void close() throws Exception {
-        backupTarget.close();
-      }
-    };
-  }
-
-  private static BackupTarget bufferTarget(BackupTarget backupTarget) {
-    BlockingQueue<IOConsumer<Void>> jobs = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
-
-    Thread[] threads = new Thread[NTHREADS];
-    AtomicBoolean run = new AtomicBoolean(true);
-    for (int i = 0; i < NTHREADS; ++i) {
-      threads[i] = new Thread(() -> {
-        while (run.get() || !jobs.isEmpty()) {
-          IOConsumer<Void> job;
-          try {
-            job = jobs.poll(1, TimeUnit.SECONDS);
-          } catch (InterruptedException e) {
-            break;
-          }
-          if (job == null) {
-            continue;
-          }
-          try {
-            job.accept(null);
-          } catch (InterruptedIOException ignored) {
-            break;
-          } catch (IOException e) {
-            onError(e);
-          }
-        }
-      });
-      threads[i].setName(backupTarget.name().toString() + "-worker-" + i);
-      threads[i].start();
-    }
-
-    return new BackupTarget() {
-      @Override
-      public Id name() {
-        return backupTarget.name();
-      }
-
-      @Override
-      public void backup(Resource r, IOConsumer<Id> k) throws IOException {
-        try {
-          jobs.put((v) -> backupTarget.backup(r, k));
-        } catch (InterruptedException e) {
-          throw new IOException(e);
-        }
-      }
-
-      @Override
-      public void close() throws Exception {
-        System.out.println("joining worker threads");
-        run.set(false);
-        for (Thread t : threads) {
-          try {
-            t.join();
-          } catch (InterruptedException ignored) {
-          }
-        }
-        System.out.println("done!");
         backupTarget.close();
       }
     };
@@ -383,7 +455,7 @@ public class Main {
           Path dst = Files.readSymbolicLink(file);
           onSymLink(file, dst);
         } else {
-          onFile(file);
+          onFile(file, attrs);
         }
       }
       return FileVisitResult.CONTINUE;
@@ -400,7 +472,7 @@ public class Main {
       return FileVisitResult.CONTINUE;
     }
 
-    protected abstract void onFile(Path file) throws IOException;
+    protected abstract void onFile(Path file, BasicFileAttributes attrs) throws IOException;
     protected abstract void onSymLink(Path src, Path dst) throws IOException;
   }
 
@@ -431,7 +503,7 @@ public class Main {
                     .map(rtext -> { if (rtext.startsWith("~")) { rtext = rtext.replaceFirst(Pattern.quote("~"), home); } return FileSystems.getDefault().getPathMatcher("glob:" + rtext); })
                     .collect(Collectors.toList())) {
               @Override
-              protected void onFile(Path path) throws IOException {
+              protected void onFile(Path path, BasicFileAttributes attrs) throws IOException {
                 if (paths.add(path)) {
                   long inode = posix.stat(path.toString()).ino();
                   Path preexisting = inodes.get(inode);
@@ -450,6 +522,7 @@ public class Main {
                     });
                   } else {
                     inodes.put(inode, path);
+                    long size = attrs.size();
                     consumer.accept(new Resource() {
                       @Override
                       public Id system() {
@@ -469,6 +542,11 @@ public class Main {
                       @Override
                       public InputStream open() throws IOException {
                         return new FileInputStream(path().toString());
+                      }
+
+                      @Override
+                      public long sizeEstimateInBytes() throws IOException {
+                        return size;
                       }
                     });
                   }

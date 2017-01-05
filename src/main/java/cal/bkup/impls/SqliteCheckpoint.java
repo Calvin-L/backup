@@ -137,7 +137,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public void noteHardLink(Id system, HardLink hardlink) throws IOException {
+  public synchronized void noteHardLink(Id system, HardLink hardlink) throws IOException {
     try {
       insertHardLink.setString(1, system.toString());
       insertHardLink.setString(2, hardlink.src().toString());
@@ -171,7 +171,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public Stream<ResourceInfo> list() throws IOException {
+  public synchronized Stream<ResourceInfo> list() throws IOException {
     List<ResourceInfo> res = new ArrayList<>();
 
     try {
@@ -219,7 +219,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public Stream<SymLink> symlinks() throws IOException {
+  public synchronized Stream<SymLink> symlinks() throws IOException {
     List<SymLink> res = new ArrayList<>();
 
     try {
@@ -248,7 +248,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public Stream<HardLink> hardlinks() throws IOException {
+  public synchronized Stream<HardLink> hardlinks() throws IOException {
     List<HardLink> res = new ArrayList<>();
 
     try {
@@ -277,7 +277,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public void close() throws IOException, SQLException {
+  public synchronized void close() throws IOException, SQLException {
     conn.commit();
     if (insertFileRecord != null) { insertFileRecord.close(); insertFileRecord = null; }
     if (insertSymLink != null) { insertSymLink.close(); insertSymLink = null; }
