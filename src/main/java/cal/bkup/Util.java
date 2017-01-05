@@ -1,8 +1,10 @@
 package cal.bkup;
 
+import java.io.Console;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 
 public abstract class Util {
 
@@ -25,6 +27,22 @@ public abstract class Util {
 
   public static <R> R fail() {
     throw new RuntimeException("failure");
+  }
+
+  public static String readPassword() {
+    Console cons = System.console();
+    if (cons == null) {
+      throw new IllegalStateException("not connected to console");
+    }
+    char[] c1 = cons.readPassword("[%s]", "Password:");
+    if (c1 == null) return null;
+    char[] c2 = cons.readPassword("[%s]", "Confirm:");
+    if (c2 == null) return null;
+    if (!Arrays.equals(c1, c2)) {
+      System.err.println("passwords do not match");
+      return null;
+    }
+    return new String(c1);
   }
 
 }

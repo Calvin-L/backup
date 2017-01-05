@@ -26,7 +26,6 @@ import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
-import java.io.Console;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -88,7 +87,11 @@ public class Main {
       "- python-env",
       "- pyenv",
       "- ~/sources/playground/calmr/py/env",
+      "- ~/sources/playground/worm/env",
       "- *.o",
+      "- *.a",
+      "- *.dylib",
+      "- *.so",
       "- *.class",
       "- *.hi",
       "- *.vo",
@@ -112,7 +115,7 @@ public class Main {
       "- .Trashes",
       "- Thumbs.db");
 
-  private enum UseDummy { USE_DUMMY, USE_REAL };
+  private enum UseDummy { USE_DUMMY, USE_REAL }
 
   private static final AtomicLong numBackedUp = new AtomicLong(0);
   private static final AtomicLong numSkipped = new AtomicLong(0);
@@ -150,7 +153,7 @@ public class Main {
     boolean dryRun = cli.hasOption('d');
     boolean list = cli.hasOption('l');
 
-    String password = cli.hasOption('p') ? cli.getOptionValue('p') : readPassword();
+    String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
     if (password != null) {
       if (list) {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, UseDummy.USE_DUMMY)) {
@@ -205,22 +208,6 @@ public class Main {
     } else {
       throw new Exception("failed to get password");
     }
-  }
-
-  private static String readPassword() {
-    Console cons = System.console();
-    if (cons == null) {
-      throw new IllegalStateException("not connected to console");
-    }
-    char[] c1 = cons.readPassword("[%s]", "Password:");
-    if (c1 == null) return null;
-    char[] c2 = cons.readPassword("[%s]", "Confirm:");
-    if (c2 == null) return null;
-    if (!Arrays.equals(c1, c2)) {
-      System.err.println("passwords do not match");
-      return null;
-    }
-    return new String(c1);
   }
 
   private static Checkpoint findMostRecentCheckpoint(String password, UseDummy dummy) throws IOException {
@@ -422,7 +409,10 @@ public class Main {
 
     // TODO: this will work best if we have a deterministic exploration order :/
     Map<Long, Path> inodes = new HashMap<>();
+
     final String home = System.getProperty("user.home");
+    POSIX posix = POSIXFactory.getPOSIX();
+    assert posix.isNative();
 
     Pattern p = Pattern.compile("^(.) (.*)$");
     for (int i = 0; i < RULES.size(); ++i) {
@@ -443,11 +433,7 @@ public class Main {
               @Override
               protected void onFile(Path path) throws IOException {
                 if (paths.add(path)) {
-                  POSIX posix = POSIXFactory.getPOSIX();
-                  assert posix.isNative();
-
                   long inode = posix.stat(path.toString()).ino();
-
                   Path preexisting = inodes.get(inode);
 
                   if (preexisting != null) {
