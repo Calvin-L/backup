@@ -1,6 +1,6 @@
 package cal.bkup;
 
-import cal.bkup.impls.DummyCheckpoint;
+import cal.bkup.impls.CachedDirectory;
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.GlacierBackupTarget;
@@ -73,14 +73,14 @@ public class Main {
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
   private static final Id SYSTEM_ID = new Id("UWLaptop");
   private static final List<String> RULES = Arrays.asList(
-//      "+ ~/sources",
+      "+ ~/sources",
       "- ~/sources/opensource",
       "+ ~/website",
       "- ~/website/output",
       "- ~/website/cozy/out",
       "- build",
       "- _build",
-//      "+ ~/Documents",
+      "+ ~/Documents",
       "+ ~/xfer",
       "- ~/xfer/penlinux.img",
       "+ ~/.bash_profile",
@@ -119,8 +119,6 @@ public class Main {
       "- .Spotlight-V100",
       "- .Trashes",
       "- Thumbs.db");
-
-  private enum UseDummy { USE_DUMMY, USE_REAL }
 
   private static final AtomicLong numBackedUp = new AtomicLong(0);
   private static final AtomicLong numSkipped = new AtomicLong(0);
@@ -166,7 +164,7 @@ public class Main {
 
     if (password != null) {
       if (list) {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, UseDummy.USE_DUMMY)) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password)) {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
@@ -178,7 +176,7 @@ public class Main {
           });
         }
       } else {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, dryRun ? UseDummy.USE_DUMMY : UseDummy.USE_REAL);
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password);
              BackupTarget target = getBackupTarget(password, checkpoint)) {
 
           System.out.println("Planning...");
@@ -337,15 +335,14 @@ public class Main {
     return ops.stream().filter(Objects::nonNull);
   }
 
-  private static Checkpoint findMostRecentCheckpoint(String password, UseDummy dummy) throws IOException {
+  private static Checkpoint findMostRecentCheckpoint(String password) throws IOException {
     System.out.println("Fetching checkpoint...");
     try {
-//      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(LocalDirectory.TMP), password);
+      Path cacheLoc = Paths.get("/tmp/s3cache");
+//      SimpleDirectory dir = new XZCompressedDirectory(new EncryptedDirectory(LocalDirectory.TMP, password));
 //      SimpleDirectory dir = LocalDirectory.TMP;
-      SimpleDirectory dir = new EncryptedDirectory(new XZCompressedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT)), password);
-      Checkpoint res = new SqliteCheckpoint(dir);
-      if (dummy == UseDummy.USE_DUMMY) res = new DummyCheckpoint(res);
-      return res;
+      SimpleDirectory dir = new XZCompressedDirectory(new EncryptedDirectory(new CachedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT), cacheLoc), password));
+      return new SqliteCheckpoint(dir);
     } catch (SQLException e) {
       throw new IOException(e);
     }
