@@ -27,7 +27,7 @@ public class EncryptedOutputStream extends OutputStream {
       // that "in" and "wrappedStream" get closed.
       try (InputStream cpy = new PoliteInputStream(in);
            OutputStream out = wrappedStream) {
-        AESCrypt crypt = new AESCrypt(true, password);
+        AESCrypt crypt = new AESCrypt(password);
         crypt.encrypt(AES_VERSION, cpy, out);
         System.out.println("thread finished");
       } catch (IOException | GeneralSecurityException e) {
