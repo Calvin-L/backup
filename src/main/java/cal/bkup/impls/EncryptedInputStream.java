@@ -22,7 +22,7 @@ public class EncryptedInputStream extends InputStream {
     PipedOutputStream out = new PipedOutputStream(stream);
     encryptionThread = new Thread(() -> {
       try (PipedOutputStream cpy = out; /* ensure that "out" gets closed */
-           InputStream in = wrappedStream /* ensure that "wrappedStream" gets closed */) {
+           InputStream in = new PoliteInputStream(wrappedStream) /* ensure that "wrappedStream" gets closed */) {
         AESCrypt crypt = new AESCrypt(password);
         crypt.encrypt(AES_VERSION, in, cpy);
       } catch (InterruptedIOException ignored) {
@@ -36,7 +36,6 @@ public class EncryptedInputStream extends InputStream {
       fail.set(true);
     });
     encryptionThread.setName(encryptionThread.getName() + " [encryption]");
-    encryptionThread.setDaemon(true);
     encryptionThread.start();
   }
 

@@ -8,7 +8,7 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.security.GeneralSecurityException;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static cal.bkup.impls.EncryptedInputStream.AES_VERSION;
 
@@ -16,26 +16,26 @@ public class EncryptedOutputStream extends OutputStream {
 
   private final OutputStream stream;
   private final Thread encryptionThread;
-  private final AtomicBoolean fail = new AtomicBoolean(false);
+  private final AtomicReference<Throwable> thrownException = new AtomicReference<>(null);
 
   public EncryptedOutputStream(OutputStream wrappedStream, String password) throws IOException {
     PipedInputStream in = new PipedInputStream(4096);
     stream = new PipedOutputStream(in);
     encryptionThread = new Thread(() -> {
-      try (InputStream cpy = in; /* ensure that "in" gets closed */
-           OutputStream out = wrappedStream /* ensure that "wrappedStream" gets closed */) {
-        AESCrypt crypt = new AESCrypt(password);
+      // The AESCrypt class does not respect the number returned by InputStream.read(byte[], ...).
+      // So, we wrap the stream in a "polite" variant that does what it expects. This also ensures
+      // that "in" and "wrappedStream" get closed.
+      try (InputStream cpy = new PoliteInputStream(in);
+           OutputStream out = wrappedStream) {
+        AESCrypt crypt = new AESCrypt(true, password);
         crypt.encrypt(AES_VERSION, cpy, out);
+        System.out.println("thread finished");
       } catch (IOException | GeneralSecurityException e) {
         throw new RuntimeException(e);
       }
     });
-    encryptionThread.setUncaughtExceptionHandler((t, e) -> {
-      e.printStackTrace();
-      fail.set(true);
-    });
+    encryptionThread.setUncaughtExceptionHandler((t, e) -> thrownException.set(e));
     encryptionThread.setName(encryptionThread.getName() + " [encryption]");
-    encryptionThread.setDaemon(true);
     encryptionThread.start();
   }
 
@@ -66,8 +66,9 @@ public class EncryptedOutputStream extends OutputStream {
       encryptionThread.join();
     } catch (InterruptedException ignored) {
     }
-    if (fail.get()) {
-      throw new IOException("encryption failed");
+    Throwable exn = thrownException.get();
+    if (exn != null) {
+      throw new IOException("encryption failed", exn);
     }
   }
 
