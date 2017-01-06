@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -48,6 +49,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement queryAllSymlinks;
   private PreparedStatement queryAllHardLinks;
   private PreparedStatement insertHardLink;
+  private PreparedStatement updateId;
 
   public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
     dir = location;
@@ -74,6 +76,50 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     }
 
     reopen();
+    fixup();
+  }
+
+  private synchronized void fixup() throws IOException, SQLException {
+    AtomicInteger goodEntries = new AtomicInteger(0);
+    AtomicInteger badGlacierEntries = new AtomicInteger(0);
+    AtomicInteger badTargetEntries = new AtomicInteger(0);
+    SqliteCheckpoint self = this;
+    Pattern rewrite = Pattern.compile("^/.*/([^/]+)$");
+    list().forEach(info -> {
+      if (info.target().toString().startsWith("glacier")) {
+        if (info.idAtTarget().toString().contains("/")) {
+          if (badGlacierEntries.incrementAndGet() < 3)
+            System.out.println("Warning: oldschool entry [" + info.idAtTarget() + ']');
+          Matcher m = rewrite.matcher(info.idAtTarget().toString());
+          if (!m.find()) {
+            throw new RuntimeException("no match: " + info.idAtTarget().toString());
+          }
+          String newId = m.group(1);
+          synchronized (self) {
+            try {
+              updateId.setString(1, newId);
+              updateId.setString(2, info.system().toString());
+              updateId.setString(3, info.path().toString());
+              updateId.setString(4, info.target().toString());
+              updateId.executeUpdate();
+            } catch (SQLException e) {
+              throw new RuntimeException(e);
+            }
+          }
+        } else {
+          if (goodEntries.incrementAndGet() < 3)
+            System.out.println("Cool entry [" + info.idAtTarget() + ']');
+        }
+      } else {
+        if (badTargetEntries.incrementAndGet() < 3)
+          System.out.println("Warning: old target [" + info.target() + ']');
+      }
+    });
+    System.out.println(goodEntries.get() + " good entries");
+    System.out.println(badGlacierEntries.get() + " bad glacier entries");
+    System.out.println(badTargetEntries.get() + " bad target entries");
+    conn.commit();
+    if (badGlacierEntries.get() > 0) save(true);
   }
 
   @Override
@@ -276,6 +322,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     if (queryAll != null) { queryAll.close(); queryAll = null; }
     if (queryAllHardLinks != null) { queryAllHardLinks.close(); queryAllHardLinks = null; }
     if (queryAllSymlinks != null) { queryAllSymlinks.close(); queryAllSymlinks = null; }
+    if (updateId != null) { updateId.close(); updateId = null; }
     if (conn != null) { conn.close(); conn = null; }
   }
 
@@ -301,6 +348,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
     insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");
+    updateId = conn.prepareStatement("UPDATE files SET id=? WHERE system=? AND file=? AND target=?");
 
   }
 
