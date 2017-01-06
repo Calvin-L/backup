@@ -5,6 +5,7 @@ import cal.bkup.types.SimpleDirectory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.GeneralSecurityException;
 import java.util.stream.Stream;
 
 public class EncryptedDirectory implements SimpleDirectory {
@@ -29,6 +30,11 @@ public class EncryptedDirectory implements SimpleDirectory {
 
   @Override
   public InputStream open(String name) throws IOException {
-    return new DecryptedInputStream(wrapped.open(name), password);
+    try {
+      return new DecryptedInputStream(wrapped.open(name), password);
+    } catch (GeneralSecurityException e) {
+      throw new IOException(e);
+    }
   }
+
 }
