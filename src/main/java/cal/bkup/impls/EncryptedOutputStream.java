@@ -29,7 +29,6 @@ public class EncryptedOutputStream extends OutputStream {
            OutputStream out = wrappedStream) {
         AESCrypt crypt = new AESCrypt(password);
         crypt.encrypt(AES_VERSION, cpy, out);
-        System.out.println("thread finished");
       } catch (IOException | GeneralSecurityException e) {
         throw new RuntimeException(e);
       }
