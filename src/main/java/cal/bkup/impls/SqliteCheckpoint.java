@@ -37,7 +37,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
   private static final String EXTENSION = ".backupdb";
 
-  private final SimpleDirectory dir;
+  private SimpleDirectory dir;
   private final Path file;
   private volatile Long lastSave;
   private Connection conn;
@@ -60,30 +60,20 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
         .max();
 
     file = Files.createTempFile("backup", "db");
+    System.out.println("Using SQLite file " + file);
     if (max.isPresent()) {
       try (InputStream in = location.open(max.getAsLong() + EXTENSION);
           OutputStream out = new BufferedOutputStream(new FileOutputStream(file.toString()))) {
         Util.copyStream(in, out);
-        lastSave = max.getAsLong();
-        System.out.println("Loaded checkpoint " + lastSave);
-      } catch (IOException e) {
-        System.out.println("Load failed [" + e + "]; creating new checkpoint");
-        Files.deleteIfExists(file);
-        lastSave = null;
       }
+      lastSave = max.getAsLong();
+      System.out.println("Loaded checkpoint " + lastSave);
     } else {
-      System.out.println("Created new checkpoint");
       lastSave = null;
+      System.out.println("Created new checkpoint");
     }
 
-    try {
-      reopen();
-    } catch (Exception e) {
-      System.out.println("Load failed [" + e + "]; creating new checkpoint");
-      Files.deleteIfExists(file);
-      reopen();
-      lastSave = null;
-    }
+    reopen();
   }
 
   @Override
@@ -312,6 +302,11 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
     insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");
 
+  }
+
+  public void moveTo(SimpleDirectory dir) throws IOException, SQLException {
+    this.dir = dir;
+    save(true);
   }
 
 }
