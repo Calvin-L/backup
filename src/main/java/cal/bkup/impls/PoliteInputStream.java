@@ -19,12 +19,12 @@ public class PoliteInputStream extends FilterInputStream {
     while (nread < len) {
       int readThisIteration = super.read(b, off, len - nread);
       if (readThisIteration < 0) {
-        return nread;
+        return nread != 0 ? nread : -1;
       }
       off += readThisIteration;
       nread += readThisIteration;
     }
-    return len;
+    return nread;
   }
 
   @Override
