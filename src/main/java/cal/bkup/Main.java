@@ -184,7 +184,7 @@ public class Main {
         }
       } else {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local);
-             BackupTarget target = getBackupTarget(password, checkpoint, local)) {
+             BackupTarget target = getBackupTarget(password, local)) {
 
           System.out.println("Planning...");
           List<Op<?>> plan = planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList());
@@ -258,12 +258,10 @@ public class Main {
     Set<Path> presentHardlinks = new HashSet<>();
     Set<Path> presentFiles = new HashSet<>();
 
-    Set<Path> checkpointedSymlinks = checkpoint.symlinks(system)
-        .map(SymLink::src)
-        .collect(Collectors.toCollection(HashSet::new));
-    Set<Path> checkpointedHardlinks = checkpoint.hardlinks(system)
-        .map(HardLink::src)
-        .collect(Collectors.toCollection(HashSet::new));
+    Map<Path, Path> checkpointedSymlinks = checkpoint.symlinks(system)
+        .collect(Collectors.toMap(SymLink::src, SymLink::dst));
+    Map<Path, Path> checkpointedHardlinks = checkpoint.hardlinks(system)
+        .collect(Collectors.toMap(HardLink::src, HardLink::dst));
     Set<Path> checkpointedFiles = checkpoint.list()
         .filter(r -> r.system().equals(system))
         .map(ResourceInfo::path)
@@ -275,38 +273,43 @@ public class Main {
     forEachFile(
         symlink -> {
           presentSymlinks.add(symlink.src());
-          ops.add(new FreeOp<Void>() {
-            @Override
-            public Void exec() throws IOException {
-              checkpoint.noteSymLink(system, symlink);
-              return null;
-            }
+          if (!Objects.equals(symlink.dst(), checkpointedSymlinks.get(symlink.src()))) {
+            ops.add(new FreeOp<Void>() {
+              @Override
+              public Void exec() throws IOException {
+                checkpoint.noteSymLink(system, symlink);
+                return null;
+              }
 
-            @Override
-            public String toString() {
-              return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
-            }
-          });
+              @Override
+              public String toString() {
+                return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
+              }
+            });
+          }
         },
         hardlink -> {
           presentHardlinks.add(hardlink.src());
-          ops.add(new FreeOp<Void>() {
-            @Override
-            public Void exec() throws IOException {
-              checkpoint.noteHardLink(system, hardlink);
-              return null;
-            }
+          if (!Objects.equals(hardlink.dst(), checkpointedHardlinks.get(hardlink.src()))) {
+            ops.add(new FreeOp<Void>() {
+              @Override
+              public Void exec() throws IOException {
+                checkpoint.noteHardLink(system, hardlink);
+                return null;
+              }
 
-            @Override
-            public String toString() {
-              return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
-            }
-          });
+              @Override
+              public String toString() {
+                return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
+              }
+            });
+          }
         },
         resource -> {
           presentFiles.add(resource.path());
-          Op<Id> op = target.backup(resource);
-          if (op != null) {
+          Instant checkpointModTime = checkpoint.modTime(resource, target);
+          if (checkpointModTime == null || resource.modTime().compareTo(checkpointModTime) > 0) {
+            Op<Id> op = target.backup(resource);
             ops.add(new Op<Void>() {
 
               @Override
@@ -339,12 +342,15 @@ public class Main {
         });
 
     // Delete old things
+    Set<Path> symLinksToRemove = new HashSet<>(checkpointedSymlinks.keySet());
+    Set<Path> hardLinksToRemove = new HashSet<>(checkpointedHardlinks.keySet());
+    Set<Path> filesToRemove = new HashSet<>(checkpointedFiles);
 
-    checkpointedSymlinks.removeAll(presentSymlinks);
-    checkpointedHardlinks.removeAll(presentHardlinks);
-    checkpointedFiles.removeAll(presentFiles);
+    symLinksToRemove.removeAll(presentSymlinks);
+    hardLinksToRemove.removeAll(presentHardlinks);
+    filesToRemove.removeAll(presentFiles);
 
-    for (Path p : checkpointedFiles) {
+    for (Path p : filesToRemove) {
       ops.add(new FreeOp<Void>() {
         @Override
         public Void exec() throws IOException {
@@ -359,7 +365,7 @@ public class Main {
       });
     }
 
-    for (Path p : checkpointedSymlinks) {
+    for (Path p : symLinksToRemove) {
       ops.add(new FreeOp<Void>() {
         @Override
         public Void exec() throws IOException {
@@ -374,7 +380,7 @@ public class Main {
       });
     }
 
-    for (Path p : checkpointedHardlinks) {
+    for (Path p : hardLinksToRemove) {
       ops.add(new FreeOp<Void>() {
         @Override
         public Void exec() throws IOException {
@@ -405,36 +411,11 @@ public class Main {
     }
   }
 
-  private static BackupTarget getBackupTarget(String password, Checkpoint checkpoint, boolean local) throws GeneralSecurityException, UnsupportedEncodingException {
+  private static BackupTarget getBackupTarget(String password, boolean local) throws GeneralSecurityException, UnsupportedEncodingException {
     BackupTarget baseTarget = local ?
         new FilesystemBackupTarget(Paths.get("/tmp/bkup")) :
         new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
-    return checkModTime(encryptTarget(baseTarget, password), checkpoint);
-  }
-
-  private static BackupTarget checkModTime(BackupTarget backupTarget, Checkpoint checkpoint) {
-    return new BackupTarget() {
-      @Override
-      public Id name() {
-        return backupTarget.name();
-      }
-
-      @Override
-      public Op<Id> backup(Resource r) throws IOException {
-        Instant checkpointModTime = checkpoint.modTime(r, backupTarget);
-        if (checkpointModTime == null || r.modTime().compareTo(checkpointModTime) > 0) {
-          return backupTarget.backup(r);
-        } else {
-          numSkipped.incrementAndGet();
-          return null;
-        }
-      }
-
-      @Override
-      public void close() throws Exception {
-        backupTarget.close();
-      }
-    };
+    return encryptTarget(baseTarget, password);
   }
 
   private static BackupTarget encryptTarget(BackupTarget backupTarget, String password) throws GeneralSecurityException, UnsupportedEncodingException {
