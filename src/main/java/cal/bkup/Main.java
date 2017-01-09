@@ -10,6 +10,7 @@ import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.XZCompressedDirectory;
+import cal.bkup.types.BackedUpResourceInfo;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
 import cal.bkup.types.HardLink;
@@ -193,7 +194,19 @@ public class Main {
           plan.addAll(planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList()));
         }
         if (gc) {
-          throw new UnsupportedOperationException();
+          Set<Id> ids = checkpoint.list()
+              .filter(info -> info.target().equals(target.name()))
+              .map(ResourceInfo::idAtTarget)
+              .collect(Collectors.toSet());
+          target.list().forEach(x -> {
+            if (!ids.contains(x.idAtTarget())) {
+              try {
+                plan.add(target.delete(x));
+              } catch (IOException e) {
+                throw new RuntimeException(e);
+              }
+            }
+          });
         }
 
         System.out.println("Estimating costs...");
@@ -475,6 +488,16 @@ public class Main {
             return r.sizeEstimateInBytes();
           }
         });
+      }
+
+      @Override
+      public Stream<BackedUpResourceInfo> list() throws IOException {
+        return backupTarget.list();
+      }
+
+      @Override
+      public Op<Void> delete(BackedUpResourceInfo id) throws IOException {
+        return backupTarget.delete(id);
       }
 
       @Override

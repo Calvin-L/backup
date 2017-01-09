@@ -46,7 +46,7 @@ public abstract class Util {
   }
 
   public static long divideAndRoundUp(long numerator, long denominator) {
-    return (numerator - 1) / denominator + 1;
+    return (numerator + denominator - 1) / denominator;
   }
 
 }

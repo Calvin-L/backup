@@ -1,11 +1,11 @@
 package cal.bkup.types;
 
 import java.io.IOException;
+import java.util.stream.Stream;
 
 public interface BackupTarget extends AutoCloseable {
-
   Id name();
-//  void backup(Resource r, IOConsumer<Id> k) throws IOException;
   Op<Id> backup(Resource r) throws IOException;
-
+  Stream<BackedUpResourceInfo> list() throws IOException;
+  Op<Void> delete(BackedUpResourceInfo obj) throws IOException;
 }

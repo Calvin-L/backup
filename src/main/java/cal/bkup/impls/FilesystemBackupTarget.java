@@ -1,6 +1,7 @@
 package cal.bkup.impls;
 
 import cal.bkup.Util;
+import cal.bkup.types.BackedUpResourceInfo;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
@@ -14,6 +15,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 public class FilesystemBackupTarget implements BackupTarget {
 
@@ -69,6 +71,53 @@ public class FilesystemBackupTarget implements BackupTarget {
       @Override
       public String toString() {
         return r.path().toString();
+      }
+    };
+  }
+
+  @Override
+  public Stream<BackedUpResourceInfo> list() throws IOException {
+    return Files.list(root)
+        .map(Path::getFileName)
+        .map(Object::toString)
+        .filter(f -> {
+          try {
+            UUID.fromString(f);
+            return true;
+          } catch (IllegalArgumentException ignored) {
+            return false;
+          }
+        })
+        .map(f -> new BackedUpResourceInfo() {
+          @Override
+          public Id idAtTarget() {
+            return new Id(f);
+          }
+
+          @Override
+          public long sizeInBytes() {
+            try {
+              return Files.size(root.resolve(f));
+            } catch (IOException e) {
+              return 0L;
+            }
+          }
+        });
+  }
+
+  @Override
+  public Op<Void> delete(BackedUpResourceInfo id) throws IOException {
+    Path path = root.resolve(id.toString());
+    return new FreeOp<Void>() {
+      @Override
+      public Void exec() throws IOException {
+        Files.deleteIfExists(path);
+        return null;
+      }
+
+      @Override
+      public String toString() {
+        return "delete backed up file at " + path;
       }
     };
   }
