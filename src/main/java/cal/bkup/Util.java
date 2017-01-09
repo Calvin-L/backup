@@ -45,4 +45,8 @@ public abstract class Util {
     return new String(c1);
   }
 
+  public static long divideAndRoundUp(long numerator, long denominator) {
+    return (numerator - 1) / denominator + 1;
+  }
+
 }

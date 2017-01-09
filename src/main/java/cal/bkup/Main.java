@@ -27,7 +27,6 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
-import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
@@ -142,12 +141,11 @@ public class Main {
     Options options = new Options();
     options.addOption("h", "help", false, "Show help and quit");
     options.addOption("p", "password", true, "Encryption password");
+    options.addOption("b", "backup", false, "Back up files");
     options.addOption("L", "local", false, "Local backup to /tmp (for testing)");
-
-    OptionGroup action = new OptionGroup();
-    action.addOption(new Option("d", "dry-run", false, "Show what would be done"));
-    action.addOption(new Option("l", "list", false, "Show inventory of current backup"));
-    options.addOptionGroup(action);
+    options.addOption("d", "dry-run", false, "Show what would be done, but do nothing");
+    options.addOption("l", "list", false, "Show inventory of current backup");
+    options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
 
     CommandLine cli;
     try {
@@ -166,6 +164,8 @@ public class Main {
 
     final boolean dryRun = cli.hasOption('d');
     final boolean list = cli.hasOption('l');
+    final boolean gc = cli.hasOption("gc");
+    final boolean backup = cli.hasOption("backup");
     final boolean local = cli.hasOption("local");
     final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
 
@@ -182,70 +182,76 @@ public class Main {
             System.out.println("/" + link.src() + " [HARD] ----> " + link.dst());
           });
         }
-      } else {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local);
-             BackupTarget target = getBackupTarget(password, local)) {
+      }
 
-          System.out.println("Planning...");
-          List<Op<?>> plan = planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList());
+      try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local);
+           BackupTarget target = getBackupTarget(password, local)) {
 
-          System.out.println("Estimating costs...");
-          long bytesXferred = plan.stream().mapToLong(Op::estimatedDataTransfer).sum();
-          Price cost = plan.stream().map(Op::cost).reduce(Price.ZERO, Price::plus);
-          Price maint = plan.stream().map(Op::monthlyMaintenanceCost).reduce(Price.ZERO, Price::plus);
+        System.out.println("Planning...");
+        List<Op<?>> plan = new ArrayList<>();
+        if (backup) {
+          plan.addAll(planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList()));
+        }
+        if (gc) {
+          throw new UnsupportedOperationException();
+        }
 
-          System.out.println("Execution plan:");
-          System.out.println("    #ops: " + plan.size());
-          System.out.println("    xfer: ~" + bytesXferred / 1024 / 1024 + " Mb");
-          System.out.println("    cost: ~" + formatPrice(cost));
-          System.out.println("    maint: ~" + formatPrice(maint));
-          System.out.println("-----------------------------------------");
+        System.out.println("Estimating costs...");
+        long bytesXferred = plan.stream().mapToLong(Op::estimatedDataTransfer).sum();
+        Price cost = plan.stream().map(Op::cost).reduce(Price.ZERO, Price::plus);
+        Price maint = plan.stream().map(Op::monthlyMaintenanceCost).reduce(Price.ZERO, Price::plus);
 
-          if (!dryRun) {
-            try {
-              BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
-              ExecutorService executor = new ThreadPoolExecutor(
-                  NTHREADS, NTHREADS,
-                  Long.MAX_VALUE, TimeUnit.SECONDS,
-                  queue,
-                  new ThreadPoolExecutor.CallerRunsPolicy());
+        System.out.println("Execution plan:");
+        System.out.println("    #ops: " + plan.size());
+        System.out.println("    xfer: ~" + Util.divideAndRoundUp(bytesXferred, 1024 * 1024) + " Mb");
+        System.out.println("    cost: ~" + formatPrice(cost));
+        System.out.println("    maint: ~" + formatPrice(maint));
+        System.out.println("-----------------------------------------");
 
-              AtomicLong done = new AtomicLong(0);
+        if (!dryRun) {
+          try {
+            BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
+            ExecutorService executor = new ThreadPoolExecutor(
+                NTHREADS, NTHREADS,
+                Long.MAX_VALUE, TimeUnit.SECONDS,
+                queue,
+                new ThreadPoolExecutor.CallerRunsPolicy());
 
-              Instant start = Instant.now();
-              for (Op<?> op : plan) {
-                System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
-                executor.execute(() -> {
-                  try {
-                    op.exec();
-                    long ndone = done.incrementAndGet();
-                    System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
-                    numBackedUp.incrementAndGet();
-                    synchronized (checkpoint) {
-                      Instant lastSave = checkpoint.lastSave();
-                      if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
-                        checkpoint.save();
-                      }
+            AtomicLong done = new AtomicLong(0);
+
+            Instant start = Instant.now();
+            for (Op<?> op : plan) {
+              System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
+              executor.execute(() -> {
+                try {
+                  op.exec();
+                  long ndone = done.incrementAndGet();
+                  System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
+                  numBackedUp.incrementAndGet();
+                  synchronized (checkpoint) {
+                    Instant lastSave = checkpoint.lastSave();
+                    if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
+                      checkpoint.save();
                     }
-                  } catch (Exception e) {
-                    onError(e);
                   }
-                });
-              }
+                } catch (Exception e) {
+                  onError(e);
+                }
+              });
+            }
 
-              executor.shutdown();
-              executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-            } finally {
-              long nbkup = numBackedUp.get();
-              System.out.println(nbkup + " backed up, " + numSkipped + " skipped, " + numErrs + " errors");
-              if (nbkup > 0L) {
-                checkpoint.save();
-              }
+            executor.shutdown();
+            executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+          } finally {
+            long nbkup = numBackedUp.get();
+            System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
+            if (plan.size() > 0) {
+              checkpoint.save();
             }
-          } else {
-            for (Op<?> o : plan) {
-              System.out.println(o);
-            }
+          }
+        } else {
+          for (Op<?> o : plan) {
+            System.out.println(o);
           }
         }
       }
@@ -291,6 +297,8 @@ public class Main {
                 return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
               }
             });
+          } else {
+            numSkipped.incrementAndGet();
           }
         },
         hardlink -> {
@@ -308,6 +316,8 @@ public class Main {
                 return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
               }
             });
+          } else {
+            numSkipped.incrementAndGet();
           }
         },
         resource -> {
@@ -343,6 +353,8 @@ public class Main {
                 return op.toString();
               }
             });
+          } else {
+            numSkipped.incrementAndGet();
           }
         });
 
