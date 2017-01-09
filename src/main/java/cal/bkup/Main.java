@@ -4,6 +4,7 @@ import cal.bkup.impls.CachedDirectory;
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.FilesystemBackupTarget;
+import cal.bkup.impls.FreeOp;
 import cal.bkup.impls.GlacierBackupTarget;
 import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.S3Directory;
@@ -17,6 +18,7 @@ import cal.bkup.types.Id;
 import cal.bkup.types.Op;
 import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
+import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 import jnr.posix.POSIX;
@@ -53,6 +55,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -251,63 +254,57 @@ public class Main {
   }
 
   private static Stream<Op<?>> planBackup(Id system, Checkpoint checkpoint, BackupTarget target) throws IOException {
+    Set<Path> presentSymlinks = new HashSet<>();
+    Set<Path> presentHardlinks = new HashSet<>();
+    Set<Path> presentFiles = new HashSet<>();
+
+    Set<Path> checkpointedSymlinks = checkpoint.symlinks(system)
+        .map(SymLink::src)
+        .collect(Collectors.toCollection(HashSet::new));
+    Set<Path> checkpointedHardlinks = checkpoint.hardlinks(system)
+        .map(HardLink::src)
+        .collect(Collectors.toCollection(HashSet::new));
+    Set<Path> checkpointedFiles = checkpoint.list()
+        .filter(r -> r.system().equals(system))
+        .map(ResourceInfo::path)
+        .collect(Collectors.toCollection(HashSet::new));
+
     List<Op<?>> ops = new ArrayList<>();
+
+    // Add new things
     forEachFile(
-        symlink -> ops.add(new Op<Void>() {
-          @Override
-          public Price cost() {
-            return Price.ZERO;
-          }
+        symlink -> {
+          presentSymlinks.add(symlink.src());
+          ops.add(new FreeOp<Void>() {
+            @Override
+            public Void exec() throws IOException {
+              checkpoint.noteSymLink(system, symlink);
+              return null;
+            }
 
-          @Override
-          public Price monthlyMaintenanceCost() {
-            return Price.ZERO;
-          }
+            @Override
+            public String toString() {
+              return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
+            }
+          });
+        },
+        hardlink -> {
+          presentHardlinks.add(hardlink.src());
+          ops.add(new FreeOp<Void>() {
+            @Override
+            public Void exec() throws IOException {
+              checkpoint.noteHardLink(system, hardlink);
+              return null;
+            }
 
-          @Override
-          public long estimatedDataTransfer() {
-            return 0;
-          }
-
-          @Override
-          public Void exec() throws IOException {
-            checkpoint.noteSymLink(system, symlink);
-            return null;
-          }
-
-          @Override
-          public String toString() {
-            return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
-          }
-        }),
-        hardlink -> ops.add(new Op<Void>() {
-          @Override
-          public Price cost() {
-            return Price.ZERO;
-          }
-
-          @Override
-          public Price monthlyMaintenanceCost() {
-            return Price.ZERO;
-          }
-
-          @Override
-          public long estimatedDataTransfer() {
-            return 0;
-          }
-
-          @Override
-          public Void exec() throws IOException {
-            checkpoint.noteHardLink(system, hardlink);
-            return null;
-          }
-
-          @Override
-          public String toString() {
-            return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
-          }
-        }),
+            @Override
+            public String toString() {
+              return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
+            }
+          });
+        },
         resource -> {
+          presentFiles.add(resource.path());
           Op<Id> op = target.backup(resource);
           if (op != null) {
             ops.add(new Op<Void>() {
@@ -340,6 +337,58 @@ public class Main {
             });
           }
         });
+
+    // Delete old things
+
+    checkpointedSymlinks.removeAll(presentSymlinks);
+    checkpointedHardlinks.removeAll(presentHardlinks);
+    checkpointedFiles.removeAll(presentFiles);
+
+    for (Path p : checkpointedFiles) {
+      ops.add(new FreeOp<Void>() {
+        @Override
+        public Void exec() throws IOException {
+          checkpoint.forgetBackup(system, p);
+          return null;
+        }
+
+        @Override
+        public String toString() {
+          return "forget backed up file " + p.toString();
+        }
+      });
+    }
+
+    for (Path p : checkpointedSymlinks) {
+      ops.add(new FreeOp<Void>() {
+        @Override
+        public Void exec() throws IOException {
+          checkpoint.forgetSymLink(system, p);
+          return null;
+        }
+
+        @Override
+        public String toString() {
+          return "forget soft link " + p.toString();
+        }
+      });
+    }
+
+    for (Path p : checkpointedHardlinks) {
+      ops.add(new FreeOp<Void>() {
+        @Override
+        public Void exec() throws IOException {
+          checkpoint.forgetHardLink(system, p);
+          return null;
+        }
+
+        @Override
+        public String toString() {
+          return "forget hard link " + p.toString();
+        }
+      });
+    }
+
     return ops.stream().filter(Objects::nonNull);
   }
 

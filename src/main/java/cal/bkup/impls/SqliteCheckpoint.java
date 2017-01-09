@@ -48,6 +48,9 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement querySymLinksBySystem;
   private PreparedStatement queryHardLinksBySystem;
   private PreparedStatement insertHardLink;
+  private PreparedStatement deleteFileRecord;
+  private PreparedStatement deleteSymLink;
+  private PreparedStatement deleteHardLink;
 
   public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
     dir = location;
@@ -269,6 +272,39 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
+  public synchronized void forgetBackup(Id system, Path p) throws IOException {
+    try {
+      deleteFileRecord.setString(1, system.toString());
+      deleteFileRecord.setString(2, p.toString());
+      deleteFileRecord.executeUpdate();
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+  }
+
+  @Override
+  public synchronized void forgetSymLink(Id system, Path p) throws IOException {
+    try {
+      deleteSymLink.setString(1, system.toString());
+      deleteSymLink.setString(2, p.toString());
+      deleteSymLink.executeUpdate();
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+  }
+
+  @Override
+  public synchronized void forgetHardLink(Id system, Path p) throws IOException {
+    try {
+      deleteHardLink.setString(1, system.toString());
+      deleteHardLink.setString(2, p.toString());
+      deleteHardLink.executeUpdate();
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+  }
+
+  @Override
   public synchronized void close() throws IOException, SQLException {
     conn.commit();
     if (insertFileRecord != null) { insertFileRecord.close(); insertFileRecord = null; }
@@ -278,6 +314,9 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     if (queryAll != null) { queryAll.close(); queryAll = null; }
     if (queryHardLinksBySystem != null) { queryHardLinksBySystem.close(); queryHardLinksBySystem = null; }
     if (querySymLinksBySystem != null) { querySymLinksBySystem.close(); querySymLinksBySystem = null; }
+    if (deleteFileRecord != null) { deleteFileRecord.close(); deleteFileRecord = null; }
+    if (deleteSymLink != null) { deleteSymLink.close(); deleteSymLink = null; }
+    if (deleteHardLink != null) { deleteHardLink.close(); deleteHardLink = null; }
     if (conn != null) { conn.close(); conn = null; }
   }
 
@@ -303,6 +342,9 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
     insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");
+    deleteFileRecord = conn.prepareStatement("DELETE FROM files WHERE system=? AND file=?");
+    deleteSymLink = conn.prepareStatement("DELETE FROM symlinks WHERE system=? AND src=?");
+    deleteHardLink = conn.prepareStatement("DELETE FROM hardlinks WHERE system=? AND src=?");
 
   }
 

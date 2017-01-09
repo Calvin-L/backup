@@ -1,6 +1,7 @@
 package cal.bkup.types;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.stream.Stream;
 
@@ -17,6 +18,10 @@ public interface Checkpoint extends AutoCloseable {
   void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException;
   void noteSymLink(Id system, SymLink link) throws IOException;
   void noteHardLink(Id systemId, HardLink hardlink) throws IOException;
+
+  void forgetBackup(Id system, Path p) throws IOException;
+  void forgetSymLink(Id system, Path p) throws IOException;
+  void forgetHardLink(Id system, Path p) throws IOException;
 
   void save() throws IOException;
 
