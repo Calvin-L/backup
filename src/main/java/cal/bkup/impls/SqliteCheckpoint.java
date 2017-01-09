@@ -45,8 +45,8 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement insertFileRecord;
   private PreparedStatement queryAll;
   private PreparedStatement insertSymLink;
-  private PreparedStatement queryAllSymlinks;
-  private PreparedStatement queryAllHardLinks;
+  private PreparedStatement querySymLinksBySystem;
+  private PreparedStatement queryHardLinksBySystem;
   private PreparedStatement insertHardLink;
 
   public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
@@ -209,11 +209,12 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized Stream<SymLink> symlinks() throws IOException {
+  public synchronized Stream<SymLink> symlinks(Id system) throws IOException {
     List<SymLink> res = new ArrayList<>();
 
     try {
-      try (ResultSet rs = queryAllSymlinks.executeQuery()) {
+      querySymLinksBySystem.setString(1, system.toString());
+      try (ResultSet rs = querySymLinksBySystem.executeQuery()) {
         while (rs.next()) {
           Path src = Paths.get(rs.getString("src"));
           Path dst = Paths.get(rs.getString("dst"));
@@ -238,11 +239,12 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized Stream<HardLink> hardlinks() throws IOException {
+  public synchronized Stream<HardLink> hardlinks(Id system) throws IOException {
     List<HardLink> res = new ArrayList<>();
 
     try {
-      try (ResultSet rs = queryAllHardLinks.executeQuery()) {
+      queryHardLinksBySystem.setString(1, system.toString());
+      try (ResultSet rs = queryHardLinksBySystem.executeQuery()) {
         while (rs.next()) {
           Path src = Paths.get(rs.getString("src"));
           Path dst = Paths.get(rs.getString("dst"));
@@ -274,8 +276,8 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     if (insertHardLink != null) { insertHardLink.close(); insertHardLink = null; }
     if (queryModTime != null) { queryModTime.close(); queryModTime = null; }
     if (queryAll != null) { queryAll.close(); queryAll = null; }
-    if (queryAllHardLinks != null) { queryAllHardLinks.close(); queryAllHardLinks = null; }
-    if (queryAllSymlinks != null) { queryAllSymlinks.close(); queryAllSymlinks = null; }
+    if (queryHardLinksBySystem != null) { queryHardLinksBySystem.close(); queryHardLinksBySystem = null; }
+    if (querySymLinksBySystem != null) { querySymLinksBySystem.close(); querySymLinksBySystem = null; }
     if (conn != null) { conn.close(); conn = null; }
   }
 
@@ -296,8 +298,8 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files");
-    queryAllSymlinks = conn.prepareStatement("SELECT src, dst FROM symlinks");
-    queryAllHardLinks = conn.prepareStatement("SELECT src, dst FROM hardlinks");
+    querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
+    queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
     insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");

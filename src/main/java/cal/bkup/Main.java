@@ -172,10 +172,10 @@ public class Main {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
-          checkpoint.symlinks().forEach(link -> {
+          checkpoint.symlinks(SYSTEM_ID).forEach(link -> {
             System.out.println("/" + link.src() + " [SOFT] ----> " + link.dst());
           });
-          checkpoint.hardlinks().forEach(link -> {
+          checkpoint.hardlinks(SYSTEM_ID).forEach(link -> {
             System.out.println("/" + link.src() + " [HARD] ----> " + link.dst());
           });
         }
