@@ -212,6 +212,7 @@ public class Main {
 
               AtomicLong done = new AtomicLong(0);
 
+              Instant start = Instant.now();
               for (Op<?> op : plan) {
                 System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
                 executor.execute(() -> {
@@ -222,7 +223,7 @@ public class Main {
                     numBackedUp.incrementAndGet();
                     synchronized (checkpoint) {
                       Instant lastSave = checkpoint.lastSave();
-                      if (lastSave == null || lastSave.compareTo(Instant.now().minus(5, ChronoUnit.MINUTES)) < 0) {
+                      if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
                         checkpoint.save();
                       }
                     }
@@ -251,6 +252,10 @@ public class Main {
     } else {
       throw new Exception("failed to get password");
     }
+  }
+
+  private static <T extends Comparable<T>> T max(T x, T y) {
+    return x.compareTo(y) < 0 ? y : x;
   }
 
   private static Stream<Op<?>> planBackup(Id system, Checkpoint checkpoint, BackupTarget target) throws IOException {
