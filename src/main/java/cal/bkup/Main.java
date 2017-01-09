@@ -3,7 +3,9 @@ package cal.bkup;
 import cal.bkup.impls.CachedDirectory;
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.EncryptedInputStream;
+import cal.bkup.impls.FilesystemBackupTarget;
 import cal.bkup.impls.GlacierBackupTarget;
+import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.XZCompressedDirectory;
@@ -136,7 +138,8 @@ public class Main {
   public static void main(String[] args) throws Exception {
     Options options = new Options();
     options.addOption("h", "help", false, "Show help and quit");
-    options.addOption(new Option("p", "password", true, "Encryption password"));
+    options.addOption("p", "password", true, "Encryption password");
+    options.addOption("L", "local", false, "Local backup to /tmp (for testing)");
 
     OptionGroup action = new OptionGroup();
     action.addOption(new Option("d", "dry-run", false, "Show what would be done"));
@@ -158,13 +161,14 @@ public class Main {
       return;
     }
 
-    boolean dryRun = cli.hasOption('d');
-    boolean list = cli.hasOption('l');
-    String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
+    final boolean dryRun = cli.hasOption('d');
+    final boolean list = cli.hasOption('l');
+    final boolean local = cli.hasOption("local");
+    final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
 
     if (password != null) {
       if (list) {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password)) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local)) {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
@@ -176,8 +180,8 @@ public class Main {
           });
         }
       } else {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password);
-             BackupTarget target = getBackupTarget(password, checkpoint)) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local);
+             BackupTarget target = getBackupTarget(password, checkpoint, local)) {
 
           System.out.println("Planning...");
           List<Op<?>> plan = planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList());
@@ -335,22 +339,23 @@ public class Main {
     return ops.stream().filter(Objects::nonNull);
   }
 
-  private static Checkpoint findMostRecentCheckpoint(String password) throws IOException {
+  private static Checkpoint findMostRecentCheckpoint(String password, boolean local) throws IOException {
     System.out.println("Fetching checkpoint...");
     try {
       Path cacheLoc = Paths.get("/tmp/s3cache");
-//      SimpleDirectory dir = new XZCompressedDirectory(new EncryptedDirectory(LocalDirectory.TMP, password));
-//      SimpleDirectory dir = LocalDirectory.TMP;
-      SimpleDirectory dir = new XZCompressedDirectory(new EncryptedDirectory(new CachedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT), cacheLoc), password));
+      SimpleDirectory dir = local ?
+          new XZCompressedDirectory(new EncryptedDirectory(LocalDirectory.TMP, password)) :
+          new XZCompressedDirectory(new EncryptedDirectory(new CachedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT), cacheLoc), password));
       return new SqliteCheckpoint(dir);
     } catch (SQLException e) {
       throw new IOException(e);
     }
   }
 
-  private static BackupTarget getBackupTarget(String password, Checkpoint checkpoint) throws GeneralSecurityException, UnsupportedEncodingException {
-//    BackupTarget baseTarget = new FilesystemBackupTarget(Paths.get("/tmp/bkup"));
-    BackupTarget baseTarget = new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
+  private static BackupTarget getBackupTarget(String password, Checkpoint checkpoint, boolean local) throws GeneralSecurityException, UnsupportedEncodingException {
+    BackupTarget baseTarget = local ?
+        new FilesystemBackupTarget(Paths.get("/tmp/bkup")) :
+        new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
     return checkModTime(encryptTarget(baseTarget, password), checkpoint);
   }
 
