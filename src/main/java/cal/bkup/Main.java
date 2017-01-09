@@ -13,6 +13,7 @@ import cal.bkup.impls.XZCompressedDirectory;
 import cal.bkup.types.BackedUpResourceInfo;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
+import cal.bkup.types.Config;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
@@ -20,8 +21,10 @@ import cal.bkup.types.Op;
 import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.Rule;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jnr.posix.POSIX;
 import jnr.posix.POSIXFactory;
 import org.apache.commons.cli.CommandLine;
@@ -32,6 +35,7 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
@@ -48,7 +52,6 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -76,54 +79,8 @@ public class Main {
   private static final String S3_ENDPOINT = "s3." + AWS_REGION + ".amazonaws.com";
   private static final int BACKLOG_CAPACITY = 8;
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
-  private static final Id SYSTEM_ID = new Id("UWLaptop");
-  private static final List<String> RULES = Arrays.asList(
-      "+ ~/sources",
-      "- ~/sources/opensource",
-      "+ ~/website",
-      "- ~/website/output",
-      "- ~/website/cozy/out",
-      "- build",
-      "- _build",
-      "- *.exe",
-      "- *.dll",
-      "- *.dylib",
-      "- *.so",
-      "+ ~/Documents",
-      "+ ~/xfer",
-      "- ~/xfer/penlinux.img",
-      "+ ~/.bash_profile",
-      "- *.log",
-      "- *.aux",
-      "- *.synctex.gz",
-      "- venv",
-      "- cockerel-env",
-      "- python-env",
-      "- pyenv",
-      "- ~/sources/playground/calmr/py/env",
-      "- ~/sources/playground/worm/env",
-      "- *.o",
-      "- *.a",
-      "- *.class",
-      "- *.hi",
-      "- *.vo",
-      "- *.glob",
-      "- *.pyc",
-      "- *.egg",
-      "- *.cmo",
-      "- *.cmx",
-      "- *.cma",
-      "- *.cmxs",
-      "- *.cmxa",
-      "- *.d",
-      "- __pycache__",
-      "- .stack-work",
-      "+ ~/Pictures",
-      "- .DS_Store",
-      "- .fseventsd",
-      "- .Spotlight-V100",
-      "- .Trashes",
-      "- Thumbs.db");
+  private static final String HOME = System.getProperty("user.home");
+  private static final Path CFG_FILE = Paths.get(HOME, ".backup-config.json").toAbsolutePath();
 
   private static final AtomicLong numBackedUp = new AtomicLong(0);
   private static final AtomicLong numSkipped = new AtomicLong(0);
@@ -170,16 +127,25 @@ public class Main {
     final boolean local = cli.hasOption("local");
     final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
 
+    final Config config;
+    try {
+      config = loadConfig(CFG_FILE);
+    } catch (FileNotFoundException e) {
+      System.err.println("Config file '" + CFG_FILE + "' not found");
+      System.exit(1);
+      return;
+    }
+
     if (password != null) {
       if (list) {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local)) {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
           });
-          checkpoint.symlinks(SYSTEM_ID).forEach(link -> {
+          checkpoint.symlinks(config.systemName()).forEach(link -> {
             System.out.println("/" + link.src() + " [SOFT] ----> " + link.dst());
           });
-          checkpoint.hardlinks(SYSTEM_ID).forEach(link -> {
+          checkpoint.hardlinks(config.systemName()).forEach(link -> {
             System.out.println("/" + link.src() + " [HARD] ----> " + link.dst());
           });
         }
@@ -191,7 +157,7 @@ public class Main {
         System.out.println("Planning...");
         List<Op<?>> plan = new ArrayList<>();
         if (backup) {
-          plan.addAll(planBackup(SYSTEM_ID, checkpoint, target).collect(Collectors.toList()));
+          plan.addAll(planBackup(config, checkpoint, target).collect(Collectors.toList()));
         }
         if (gc) {
           Set<Id> ids = checkpoint.list()
@@ -273,21 +239,73 @@ public class Main {
     }
   }
 
+  private static class RawConfig {
+    public String system;
+    public List<String> rules;
+  }
+
+  private static Config loadConfig(Path target) throws IOException {
+
+    RawConfig r;
+    try (InputStream in = new FileInputStream(target.toString())) {
+      r = new ObjectMapper().readValue(in, RawConfig.class);
+    }
+
+    Id systemId = new Id(r.system);
+    Pattern p = Pattern.compile("^(.) (.*)$");
+    List<Rule> rules = new ArrayList<>();
+    for (String rule : r.rules) {
+      Matcher m = p.matcher(rule);
+      if (m.find()) {
+        char c = m.group(1).charAt(0);
+        String ruleText = m.group(2);
+        if (ruleText.startsWith("~")) {
+          ruleText = ruleText.replaceFirst(Pattern.quote("~"), HOME);
+        }
+        String finalRuleText = ruleText;
+        switch (c) {
+          case '+':
+            rules.add((include, exclude) -> include.accept(Paths.get(finalRuleText)));
+            break;
+          case '-':
+            rules.add((include, exclude) -> exclude.accept(FileSystems.getDefault().getPathMatcher("glob:" + finalRuleText)));
+            break;
+          default:
+            throw new IllegalArgumentException("Cannot process rule '" + rule + '\'');
+        }
+      } else {
+        throw new IllegalArgumentException("Cannot process rule '" + rule + '\'');
+      }
+    }
+
+    return new Config() {
+      @Override
+      public Id systemName() {
+        return systemId;
+      }
+
+      @Override
+      public List<Rule> backupRules() {
+        return rules;
+      }
+    };
+  }
+
   private static <T extends Comparable<T>> T max(T x, T y) {
     return x.compareTo(y) < 0 ? y : x;
   }
 
-  private static Stream<Op<?>> planBackup(Id system, Checkpoint checkpoint, BackupTarget target) throws IOException {
+  private static Stream<Op<?>> planBackup(Config config, Checkpoint checkpoint, BackupTarget target) throws IOException {
     Set<Path> presentSymlinks = new HashSet<>();
     Set<Path> presentHardlinks = new HashSet<>();
     Set<Path> presentFiles = new HashSet<>();
 
-    Map<Path, Path> checkpointedSymlinks = checkpoint.symlinks(system)
+    Map<Path, Path> checkpointedSymlinks = checkpoint.symlinks(config.systemName())
         .collect(Collectors.toMap(SymLink::src, SymLink::dst));
-    Map<Path, Path> checkpointedHardlinks = checkpoint.hardlinks(system)
+    Map<Path, Path> checkpointedHardlinks = checkpoint.hardlinks(config.systemName())
         .collect(Collectors.toMap(HardLink::src, HardLink::dst));
     Set<Path> checkpointedFiles = checkpoint.list()
-        .filter(r -> r.system().equals(system))
+        .filter(r -> r.system().equals(config.systemName()))
         .map(ResourceInfo::path)
         .collect(Collectors.toCollection(HashSet::new));
 
@@ -295,13 +313,14 @@ public class Main {
 
     // Add new things
     forEachFile(
+        config,
         symlink -> {
           presentSymlinks.add(symlink.src());
           if (!Objects.equals(symlink.dst(), checkpointedSymlinks.get(symlink.src()))) {
             ops.add(new FreeOp<Void>() {
               @Override
               public Void exec() throws IOException {
-                checkpoint.noteSymLink(system, symlink);
+                checkpoint.noteSymLink(config.systemName(), symlink);
                 return null;
               }
 
@@ -320,7 +339,7 @@ public class Main {
             ops.add(new FreeOp<Void>() {
               @Override
               public Void exec() throws IOException {
-                checkpoint.noteHardLink(system, hardlink);
+                checkpoint.noteHardLink(config.systemName(), hardlink);
                 return null;
               }
 
@@ -384,7 +403,7 @@ public class Main {
       ops.add(new FreeOp<Void>() {
         @Override
         public Void exec() throws IOException {
-          checkpoint.forgetBackup(system, p);
+          checkpoint.forgetBackup(config.systemName(), p);
           return null;
         }
 
@@ -399,7 +418,7 @@ public class Main {
       ops.add(new FreeOp<Void>() {
         @Override
         public Void exec() throws IOException {
-          checkpoint.forgetSymLink(system, p);
+          checkpoint.forgetSymLink(config.systemName(), p);
           return null;
         }
 
@@ -414,7 +433,7 @@ public class Main {
       ops.add(new FreeOp<Void>() {
         @Override
         public Void exec() throws IOException {
-          checkpoint.forgetHardLink(system, p);
+          checkpoint.forgetHardLink(config.systemName(), p);
           return null;
         }
 
@@ -552,32 +571,33 @@ public class Main {
     protected abstract void onSymLink(Path src, Path dst) throws IOException;
   }
 
-  private static void forEachFile(IOConsumer<SymLink> symlinkConsumer, IOConsumer<HardLink> hardLinkConsumer, IOConsumer<Resource> consumer) throws IOException {
+  private static void forEachFile(Config config, IOConsumer<SymLink> symlinkConsumer, IOConsumer<HardLink> hardLinkConsumer, IOConsumer<Resource> consumer) throws IOException {
     Collection<Path> paths = new HashSet<>();
 
     // TODO: this will work best if we have a deterministic exploration order :/
     Map<Long, Path> inodes = new HashMap<>();
+    List<Rule> rules = config.backupRules();
 
-    final String home = System.getProperty("user.home");
     POSIX posix = POSIXFactory.getPOSIX();
     assert posix.isNative();
 
     Pattern p = Pattern.compile("^(.) (.*)$");
-    for (int i = 0; i < RULES.size(); ++i) {
-      String r = RULES.get(i);
-      Matcher m = p.matcher(r);
-      if (m.find()) {
-        char c = m.group(1).charAt(0);
-        String rule = m.group(2);
-        switch (c) {
-          case '+':
-            rule = rule.replace("~", home);
-            Files.walkFileTree(Paths.get(rule), new Visitor(
-                RULES.subList(i + 1, RULES.size()).stream()
-                    .filter(rr -> rr.startsWith("-"))
-                    .map(rr -> { Matcher mm = p.matcher(rr); return mm.find() ? mm.group(2) : Util.fail(); })
-                    .map(rtext -> { if (rtext.startsWith("~")) { rtext = rtext.replaceFirst(Pattern.quote("~"), home); } return FileSystems.getDefault().getPathMatcher("glob:" + rtext); })
-                    .collect(Collectors.toList())) {
+    for (int i = 0; i < rules.size(); ++i) {
+      Rule r = rules.get(i);
+
+      int index = i;
+      r.destruct(
+          include -> {
+            List<PathMatcher> exclusions = new ArrayList<>();
+            rules.subList(index + 1, rules.size())
+                .forEach(rr -> {
+                  try {
+                    r.destruct(inc -> {}, exclusions::add);
+                  } catch (IOException e) {
+                    throw new RuntimeException(e);
+                  }
+                });
+            Files.walkFileTree(include, new Visitor(exclusions) {
               @Override
               protected void onFile(Path path, BasicFileAttributes attrs) throws IOException {
                 if (paths.add(path)) {
@@ -602,7 +622,7 @@ public class Main {
                     consumer.accept(new Resource() {
                       @Override
                       public Id system() {
-                        return SYSTEM_ID;
+                        return config.systemName();
                       }
 
                       @Override
@@ -646,13 +666,8 @@ public class Main {
                 }
               }
             });
-            break;
-          case '-':
-            break;
-          default:
-            throw new RuntimeException("unknown start char " + c);
-        }
-      }
+          },
+          exclude -> { });
     }
   }
 
