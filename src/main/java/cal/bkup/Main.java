@@ -238,6 +238,10 @@ public class Main {
                 checkpoint.save();
               }
             }
+          } else {
+            for (Op<?> o : plan) {
+              System.out.println(o);
+            }
           }
         }
       }
