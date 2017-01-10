@@ -88,10 +88,13 @@ public class Encryption {
   @Test
   public void testEncryptedInputStream() throws Exception {
     String data = "hello world!";
-    Assert.assertEquals(
-        new String(DecryptedInputStream.decrypt(
-            new EncryptedInputStream(new StringInputStream(data), password),
-            password)),
-        data);
+    do {
+      Assert.assertEquals(
+          new String(DecryptedInputStream.decrypt(
+              new EncryptedInputStream(new StringInputStream(data), password),
+              password)),
+          data);
+      data = data + data;
+    } while (data.length() < 1024 * 1024 * 2);
   }
 }
