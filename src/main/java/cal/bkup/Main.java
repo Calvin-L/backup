@@ -576,7 +576,6 @@ public class Main {
     POSIX posix = POSIXFactory.getPOSIX();
     assert posix.isNative();
 
-    Pattern p = Pattern.compile("^(.) (.*)$");
     for (int i = 0; i < rules.size(); ++i) {
       Rule r = rules.get(i);
 
