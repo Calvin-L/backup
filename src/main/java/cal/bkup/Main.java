@@ -92,11 +92,15 @@ public class Main {
 
   public static void main(String[] args) throws Exception {
     Options options = new Options();
+
+    // flags
     options.addOption("h", "help", false, "Show help and quit");
     options.addOption("p", "password", true, "Encryption password");
-    options.addOption("b", "backup", false, "Back up files");
     options.addOption("L", "local", false, "Local backup to /tmp (for testing)");
     options.addOption("d", "dry-run", false, "Show what would be done, but do nothing");
+
+    // actions
+    options.addOption("b", "backup", false, "Back up files");
     options.addOption("l", "list", false, "Show inventory of current backup");
     options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
 
