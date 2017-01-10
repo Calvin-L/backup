@@ -82,7 +82,7 @@ public class Main {
   private static final String HOME = System.getProperty("user.home");
   private static final Path CFG_FILE = Paths.get(HOME, ".backup-config.json").toAbsolutePath();
 
-  private static final AtomicLong numBackedUp = new AtomicLong(0);
+  private static final AtomicLong numSuccessful = new AtomicLong(0);
   private static final AtomicLong numSkipped = new AtomicLong(0);
   private static final AtomicLong numErrs = new AtomicLong(0);
 
@@ -205,11 +205,13 @@ public class Main {
                   op.exec();
                   long ndone = done.incrementAndGet();
                   System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
-                  numBackedUp.incrementAndGet();
-                  synchronized (checkpoint) {
-                    Instant lastSave = checkpoint.lastSave();
-                    if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
-                      checkpoint.save();
+                  numSuccessful.incrementAndGet();
+                  if (backup) {
+                    synchronized (checkpoint) {
+                      Instant lastSave = checkpoint.lastSave();
+                      if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
+                        checkpoint.save();
+                      }
                     }
                   }
                 } catch (Exception e) {
@@ -221,9 +223,9 @@ public class Main {
             executor.shutdown();
             executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
           } finally {
-            long nbkup = numBackedUp.get();
+            long nbkup = numSuccessful.get();
             System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
-            if (plan.size() > 0) {
+            if (backup) {
               checkpoint.save();
             }
           }
