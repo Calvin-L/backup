@@ -211,7 +211,7 @@ public class AESCrypt {
 	 * Returns the number of bytes actually read. If the number actually read is fewer than
 	 * the length desired, then the end of the stream has been reached.
 	 */
-	protected int tryRead(InputStream in, byte[] bytes) throws IOException {
+	protected static int tryRead(InputStream in, byte[] bytes) throws IOException {
 		int off = 0;
 		int numRead;
 		while (off < bytes.length && (numRead = in.read(bytes, off, bytes.length - off)) != -1) {
@@ -225,7 +225,7 @@ public class AESCrypt {
 	 * If the number skipped is fewer than the number desired, then the end of the stream has
 	 * been reached.
 	 */
-	protected long trySkip(InputStream in, long len) throws IOException {
+	protected static long trySkip(InputStream in, long len) throws IOException {
 		long total = 0;
 		long nskipped;
 		while (total < len && (nskipped = in.skip(len - total)) >= 0) {
@@ -238,7 +238,7 @@ public class AESCrypt {
 	 * Utility method to read bytes from a stream until the given array is fully filled.
 	 * @throws IOException if the array can't be filled.
 	 */
-	protected void readBytes(InputStream in, byte[] bytes) throws IOException {
+	protected static void readBytes(InputStream in, byte[] bytes) throws IOException {
 		if (tryRead(in, bytes) < bytes.length) {
 			throw new IOException("Unexpected end of file");
 		}
