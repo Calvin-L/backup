@@ -32,15 +32,27 @@ import com.amazonaws.services.glacier.model.UploadArchiveRequest;
 import com.amazonaws.services.glacier.model.UploadArchiveResult;
 import com.amazonaws.services.glacier.model.UploadMultipartPartRequest;
 import com.amazonaws.services.glacier.model.UploadMultipartPartResult;
+import com.amazonaws.services.kms.model.UnsupportedOperationException;
 import com.amazonaws.util.BinaryUtils;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import org.apache.commons.math3.fraction.BigFraction;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -55,10 +67,14 @@ public class GlacierBackupTarget implements BackupTarget {
 
   // See https://aws.amazon.com/glacier/pricing/
   // See https://aws.amazon.com/glacier/faqs/
-  private static final BigDecimal PENNIES_PER_UPLOAD_REQ = new BigDecimal(0.05).multiply(new BigDecimal(100)).divide(new BigDecimal(1000));
-  private static final BigDecimal PENNIES_PER_GB_MONTH = new BigDecimal(0.004).multiply(new BigDecimal(100));
-  private static final BigDecimal EXTRA_BYTES_PER_ARCHIVE = new BigDecimal(32 * 1024); // 32 Kb
-  private static final BigDecimal ONE_GB = new BigDecimal(1024L * 1024L * 1024L);
+  private static final BigFraction PENNIES_PER_UPLOAD_REQ = new BigFraction(0.05).multiply(new BigFraction(100)).divide(new BigFraction(1000));
+  private static final BigFraction PENNIES_PER_GB_MONTH = new BigFraction(0.004).multiply(new BigFraction(100));
+  private static final BigFraction EXTRA_BYTES_PER_ARCHIVE = new BigFraction(32 * 1024); // 32 Kb
+  private static final BigFraction ONE_GB = new BigFraction(1024L * 1024L * 1024L);
+  private static final Duration ONE_MONTH = Duration.of(30, ChronoUnit.DAYS);
+  private static final Duration MINIMUM_STORAGE_DURATION = ONE_MONTH.multipliedBy(3);
+  private static final BigFraction EARLY_DELETION_FEE_PER_GB_MONTH = PENNIES_PER_GB_MONTH;
+  private static final BigFraction MONTHS_PER_SECOND = BigFraction.ONE.divide(new BigFraction(ONE_MONTH.get(ChronoUnit.SECONDS)));
 
   private final Id id;
   private final AmazonGlacier client;
@@ -75,7 +91,7 @@ public class GlacierBackupTarget implements BackupTarget {
   }
 
   private static Price maintenanceCostForArchive(long archiveSizeInBytes) {
-    BigDecimal value = PENNIES_PER_GB_MONTH.multiply(new BigDecimal(archiveSizeInBytes).add(EXTRA_BYTES_PER_ARCHIVE)).divide(ONE_GB);
+    BigFraction value = PENNIES_PER_GB_MONTH.multiply(new BigFraction(archiveSizeInBytes).add(EXTRA_BYTES_PER_ARCHIVE)).divide(ONE_GB);
     return () -> value;
   }
 
@@ -134,7 +150,7 @@ public class GlacierBackupTarget implements BackupTarget {
     return new Op<Id>() {
       @Override
       public Price cost() {
-        return () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigDecimal(nbytes / chunkSize).add(BigDecimal.ONE));
+        return () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(nbytes / chunkSize).add(BigFraction.TWO));
       }
 
       @Override
@@ -204,74 +220,161 @@ public class GlacierBackupTarget implements BackupTarget {
     return soFar;
   }
 
-  @Override
-  public Stream<BackedUpResourceInfo> list() throws IOException {
-    // 1. find existing job
-    System.out.println("Finding job...");
-    String jobId = null;
-    boolean complete = false;
-    ListJobsResult res = client.listJobs(new ListJobsRequest().withVaultName(vaultName));
-    for (GlacierJobDescription job : res.getJobList()) {
-      // TODO: proper handling for the ARN
-      if (job.getAction().equals("InventoryRetrieval") &&
-          job.getVaultARN().contains(vaultName) &&
-          !job.getStatusCode().equals(StatusCode.Failed.toString())) {
-        jobId = job.getJobId();
-        complete = job.getCompleted();
-        System.out.println("Found job " + jobId + " [complete=" + complete + ']');
-        break;
-      }
-    }
+  private static final Path listLoc = Paths.get("/tmp/glacier-inventory");
 
-    // 2. if missing, initiate job
-    if (jobId == null) {
-      InitiateJobResult initJobRes = client.initiateJob(new InitiateJobRequest()
-          .withVaultName(vaultName)
-          .withJobParameters(new JobParameters()
-              .withType("inventory-retrieval")));
-      jobId = initJobRes.getJobId();
-      System.out.println("Created new job " + jobId);
-    }
-
-    // 3. wait for job to complete
-    while (!complete) {
-      System.out.println("Waiting for completion...");
-      try {
-        Thread.sleep(1000L * 60L * 5L); // sleep 5 minutes
-      } catch (InterruptedException e) {
-        throw new IOException(e);
+  private InputStream loadInventory() throws IOException {
+    if (!Files.exists(listLoc)) {
+      // 1. find existing job
+      System.out.println("Finding job...");
+      String jobId = null;
+      boolean complete = false;
+      ListJobsResult res = client.listJobs(new ListJobsRequest().withVaultName(vaultName));
+      for (GlacierJobDescription job : res.getJobList()) {
+        // TODO: proper handling for the ARN
+        if (job.getAction().equals("InventoryRetrieval") &&
+            job.getVaultARN().contains(vaultName) &&
+            !job.getStatusCode().equals(StatusCode.Failed.toString())) {
+          jobId = job.getJobId();
+          complete = job.getCompleted();
+          System.out.println("Found job " + jobId + " [complete=" + complete + ']');
+          break;
+        }
       }
 
-      DescribeJobResult jobInfo = client.describeJob(new DescribeJobRequest()
+      // 2. if missing, initiate job
+      if (jobId == null) {
+        InitiateJobResult initJobRes = client.initiateJob(new InitiateJobRequest()
+            .withVaultName(vaultName)
+            .withJobParameters(new JobParameters()
+                .withType("inventory-retrieval")));
+        jobId = initJobRes.getJobId();
+        System.out.println("Created new job " + jobId);
+      }
+
+      // 3. wait for job to complete
+      while (!complete) {
+        System.out.print("Waiting for inventory... ");
+        System.out.flush();
+        try {
+          Thread.sleep(1000L * 60L * 5L); // sleep 5 minutes
+        } catch (InterruptedException e) {
+          throw new IOException(e);
+        }
+
+        DescribeJobResult jobInfo = client.describeJob(new DescribeJobRequest()
+            .withVaultName(vaultName)
+            .withJobId(jobId));
+
+        System.out.println("status=" + jobInfo.getStatusCode());
+        if (jobInfo.getStatusCode().equals(StatusCode.Failed.toString())) {
+          throw new IOException("job " + jobId + " failed");
+        }
+
+        complete = jobInfo.isCompleted();
+      }
+
+      // 4. download job result
+      GetJobOutputResult outputResult = client.getJobOutput(new GetJobOutputRequest()
           .withVaultName(vaultName)
           .withJobId(jobId));
 
-      if (jobInfo.getStatusCode().equals(StatusCode.Failed.toString())) {
-        throw new IOException("job " + jobId + " failed");
+      try (InputStream output = outputResult.getBody();
+           OutputStream dest = new FileOutputStream(listLoc.toString())) {
+        Util.copyStream(output, dest);
       }
-
-      complete = jobInfo.isCompleted();
     }
 
-    // 4. download job result
-    GetJobOutputResult outputResult = client.getJobOutput(new GetJobOutputRequest()
-        .withVaultName(vaultName)
-        .withJobId(jobId));
+    return new FileInputStream(listLoc.toString());
+  }
 
-    try (InputStream output = outputResult.getBody();
-         OutputStream dest = new FileOutputStream("/tmp/glacier-inventory")) {
-      Util.copyStream(output, dest);
+  @Override
+  public Stream<BackedUpResourceInfo> list() throws IOException {
+    List<BackedUpResourceInfo> res = new ArrayList<>();
+    try (InputStream in = loadInventory()) {
+      JsonParser parser = new JsonFactory().createParser(in);
+      JsonToken tok;
+      String currentField = null;
+      String archiveId = null;
+      String creationDate = null;
+      Long size = null;
+      while ((tok = parser.nextToken()) != null) {
+        switch (tok) {
+          case NOT_AVAILABLE:
+            continue;
+          case START_OBJECT:
+            currentField = null;
+            archiveId = null;
+            size = null;
+            creationDate = null;
+            break;
+          case END_OBJECT:
+            if (archiveId != null && creationDate != null && size != null) {
+              Id id = new Id(archiveId);
+              long sz = size;
+              Instant time = Instant.from(DateTimeFormatter.ISO_INSTANT.parse(creationDate));
+              res.add(new BackedUpResourceInfo() {
+                @Override
+                public Id idAtTarget() {
+                  return id;
+                }
+
+                @Override
+                public long sizeInBytes() {
+                  return sz;
+                }
+
+                @Override
+                public Instant backupTime() {
+                  return time;
+                }
+              });
+            }
+            break;
+          case FIELD_NAME:
+            currentField = parser.getCurrentName();
+            break;
+          case VALUE_EMBEDDED_OBJECT:
+            throw new UnsupportedOperationException(tok.toString());
+          case VALUE_STRING:
+            if ("ArchiveId".equals(currentField)) {
+              archiveId = parser.getText();
+            } else if ("CreationDate".equals(currentField)) {
+              creationDate = parser.getText();
+            }
+            break;
+          case VALUE_NUMBER_INT:
+            if ("Size".equals(currentField)) {
+              size = parser.getLongValue();
+            }
+            break;
+          case START_ARRAY:
+          case END_ARRAY:
+          case VALUE_NUMBER_FLOAT:
+          case VALUE_TRUE:
+          case VALUE_FALSE:
+          case VALUE_NULL:
+            break;
+        }
+      }
     }
-
-    throw new UnsupportedOperationException();
+    return res.stream();
   }
 
   @Override
   public Op<Void> delete(BackedUpResourceInfo obj) {
+    Instant now = Instant.now();
     return new Op<Void>() {
       @Override
       public Price cost() {
-        return Price.ZERO;
+        Duration lifetime = Duration.between(obj.backupTime(), now);
+        Duration earlyDeletion = MINIMUM_STORAGE_DURATION.minus(lifetime);
+        return earlyDeletion.isNegative() ?
+            Price.ZERO :
+            () -> EARLY_DELETION_FEE_PER_GB_MONTH
+                .multiply(new BigFraction(obj.sizeInBytes()).add(EXTRA_BYTES_PER_ARCHIVE))
+                .multiply(new BigFraction(earlyDeletion.get(ChronoUnit.SECONDS)))
+                .multiply(MONTHS_PER_SECOND)
+                .divide(ONE_GB);
       }
 
       @Override
@@ -290,6 +393,11 @@ public class GlacierBackupTarget implements BackupTarget {
             .withVaultName(vaultName)
             .withArchiveId(obj.idAtTarget().toString()));
         return null;
+      }
+
+      @Override
+      public String toString() {
+        return "delete archive " + vaultName + '/' + obj.idAtTarget() + " [" + Util.formatSize(obj.sizeInBytes()) + ']';
       }
     };
   }

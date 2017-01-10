@@ -90,11 +90,6 @@ public class Main {
     new HelpFormatter().printHelp("backup [options]", options);
   }
 
-  private static String formatPrice(Price p) {
-    long pennies = p.valueInCents().longValue();
-    return "$" + (pennies / 100) + '.' + (pennies % 100 / 10) + (pennies % 100 % 10);
-  }
-
   public static void main(String[] args) throws Exception {
     Options options = new Options();
     options.addOption("h", "help", false, "Show help and quit");
@@ -183,8 +178,8 @@ public class Main {
         System.out.println("Execution plan:");
         System.out.println("    #ops: " + plan.size());
         System.out.println("    xfer: ~" + Util.divideAndRoundUp(bytesXferred, 1024 * 1024) + " Mb");
-        System.out.println("    cost: ~" + formatPrice(cost));
-        System.out.println("    maint: ~" + formatPrice(maint));
+        System.out.println("    cost: ~" + Util.formatPrice(cost));
+        System.out.println("    maint: ~" + Util.formatPrice(maint));
         System.out.println("-----------------------------------------");
 
         if (!dryRun) {

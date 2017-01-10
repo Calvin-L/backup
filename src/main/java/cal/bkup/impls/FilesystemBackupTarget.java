@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -100,6 +101,15 @@ public class FilesystemBackupTarget implements BackupTarget {
               return Files.size(root.resolve(f));
             } catch (IOException e) {
               return 0L;
+            }
+          }
+
+          @Override
+          public Instant backupTime() {
+            try {
+              return Files.getLastModifiedTime(root.resolve(f)).toInstant();
+            } catch (IOException e) {
+              throw new RuntimeException(e);
             }
           }
         });

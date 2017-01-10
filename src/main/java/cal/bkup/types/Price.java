@@ -1,15 +1,15 @@
 package cal.bkup.types;
 
-import java.math.BigDecimal;
+import org.apache.commons.math3.fraction.BigFraction;
 
 public interface Price {
 
-  Price ZERO = () -> BigDecimal.ZERO;
+  Price ZERO = () -> BigFraction.ZERO;
 
-  BigDecimal valueInCents();
+  BigFraction valueInCents();
 
   default Price plus(Price p2) {
-    final BigDecimal val = valueInCents().add(p2.valueInCents());
+    final BigFraction val = valueInCents().add(p2.valueInCents());
     return () -> val;
   }
 
