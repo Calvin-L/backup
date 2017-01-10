@@ -272,7 +272,7 @@ public class AESCrypt {
 	public void encrypt(int version, InputStream in, OutputStream out)
 	throws IOException, GeneralSecurityException {
 		try {
-			byte[] text = null;
+			byte[] text;
 
 			ivSpec1 = new IvParameterSpec(generateIv1());
 			aesKey1 = new SecretKeySpec(generateAESKey1(ivSpec1.getIV(), password), CRYPT_ALG);
@@ -338,7 +338,7 @@ public class AESCrypt {
 	public void decrypt(long inSize, InputStream in, OutputStream out)
 	throws IOException, GeneralSecurityException {
 		try {
-			byte[] text = null, backup = null;
+			byte[] text, backup;
 			long total = 3 + 1 + 1 + BLOCK_SIZE + BLOCK_SIZE + KEY_SIZE + SHA_SIZE + 1 + SHA_SIZE;
 			int version;
 
