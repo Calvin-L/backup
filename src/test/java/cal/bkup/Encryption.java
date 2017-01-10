@@ -4,16 +4,19 @@ import cal.bkup.impls.DecryptedInputStream;
 import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.EncryptedOutputStream;
 import com.amazonaws.util.StringInputStream;
+import es.vocali.util.AESCrypt;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
+import java.util.Random;
 import java.util.function.Function;
 
 @Test
@@ -86,15 +89,62 @@ public class Encryption {
   }
 
   @Test
-  public void testEncryptedInputStream() throws Exception {
+  public void testEncryptedInputStream1() throws Exception {
+    Random random = new Random();
+    for (int i = 0; i <= 32; ++i) {
+      byte[] bytes = new byte[i];
+      random.nextBytes(bytes);
+      Assert.assertEquals(
+          DecryptedInputStream.decrypt(
+              new EncryptedInputStream(new SlowStream(new ByteArrayInputStream(bytes)), password),
+              password),
+          bytes);
+    };
+  }
+
+  @Test
+  public void testSlowStreams() throws Exception {
+    String data = "hello world";
+    String password = "asdfjkl;";
+    String charset = "UTF-8";
+
+    // Encrypt
+    ByteArrayOutputStream encryptedOut = new ByteArrayOutputStream();
+    new AESCrypt(password).encrypt(2, new SlowStream(new ByteArrayInputStream(data.getBytes(charset))), encryptedOut);
+    byte[] encrypted = encryptedOut.toByteArray();
+
+    // Decrypt
+    ByteArrayOutputStream decryptedOut = new ByteArrayOutputStream();
+    new AESCrypt(password).decrypt(encrypted.length, new SlowStream(new ByteArrayInputStream(encrypted)), decryptedOut);
+    String decrypted = new String(decryptedOut.toByteArray(), charset);
+
+    Assert.assertEquals(data, decrypted);
+  }
+
+  @Test
+  public void testEncryptedInputStream2() throws Exception {
     String data = "hello world!";
     do {
       Assert.assertEquals(
           new String(DecryptedInputStream.decrypt(
-              new EncryptedInputStream(new StringInputStream(data), password),
+              new EncryptedInputStream(new SlowStream(new StringInputStream(data)), password),
               password)),
           data);
       data = data + data;
     } while (data.length() < 1024 * 1024 * 2);
+  }
+
+  private class SlowStream extends FilterInputStream {
+    public SlowStream(InputStream stream) { super(stream); }
+
+    @Override
+    public int read(byte[] b) throws IOException {
+      return read(b, 0, b.length);
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException {
+      return super.read(b, off, Math.min(len, 1));
+    }
   }
 }

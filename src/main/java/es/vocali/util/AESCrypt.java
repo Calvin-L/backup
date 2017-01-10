@@ -206,13 +206,26 @@ public class AESCrypt {
 		return aesKey;
 	}
 
+	/**
+	 * Utility method to read bytes from a stream until the given array is fully filled.
+	 * Returns the number of bytes actually read. If the number actually read is fewer than
+	 * the length desired, then the end of the stream has been reached.
+	 */
+	protected int tryRead(InputStream in, byte[] bytes) throws IOException {
+		int off = 0;
+		int numRead;
+		while (off < bytes.length && (numRead = in.read(bytes, off, bytes.length - off)) != -1) {
+			off += numRead;
+		}
+		return off;
+	}
 
 	/**
 	 * Utility method to read bytes from a stream until the given array is fully filled.
 	 * @throws IOException if the array can't be filled.
 	 */
 	protected void readBytes(InputStream in, byte[] bytes) throws IOException {
-		if (in.read(bytes) != bytes.length) {
+		if (tryRead(in, bytes) < bytes.length) {
 			throw new IOException("Unexpected end of file");
 		}
 	}
@@ -308,7 +321,7 @@ public class AESCrypt {
 			hmac.init(new SecretKeySpec(aesKey2.getEncoded(), HMAC_ALG));
 			text = new byte[BLOCK_SIZE];
 			int len, last = 0;
-			while ((len = in.read(text)) > 0) {
+			while ((len = tryRead(in, text)) > 0) {
 				cipher.update(text, 0, BLOCK_SIZE, text);
 				hmac.update(text);
 				out.write(text);	// Crypted file data block.
@@ -411,9 +424,7 @@ public class AESCrypt {
 			text = new byte[BLOCK_SIZE];
 			for (int block = (int) (total / BLOCK_SIZE); block > 0; block--) {
 				int len = BLOCK_SIZE;
-				if (in.read(backup, 0, len) != len) {	// Cyphertext block.
-					throw new IOException("Unexpected end of file contents");
-				}
+				readBytes(in, backup);
 				cipher.update(backup, 0, len, text);
 				hmac.update(backup, 0, len);
 				if (block == 1) {
