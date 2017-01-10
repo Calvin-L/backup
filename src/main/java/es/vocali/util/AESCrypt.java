@@ -221,6 +221,20 @@ public class AESCrypt {
 	}
 
 	/**
+	 * Utility method to skip bytes from a stream. Returns the number of bytes actually skipped.
+	 * If the number skipped is fewer than the number desired, then the end of the stream has
+	 * been reached.
+	 */
+	protected long trySkip(InputStream in, long len) throws IOException {
+		long total = 0;
+		long nskipped;
+		while (total < len && (nskipped = in.skip(len - total)) >= 0) {
+			total += nskipped;
+		}
+		return total;
+	}
+
+	/**
 	 * Utility method to read bytes from a stream until the given array is fully filled.
 	 * @throws IOException if the array can't be filled.
 	 */
@@ -375,7 +389,7 @@ public class AESCrypt {
 				do {
 					readBytes(in, text);
 					len = ((0xff & (int) text[0]) << 8) | (0xff & (int) text[1]);
-					if (in.skip(len) != len) {
+					if (trySkip(in, len) != len) {
 						throw new IOException("Unexpected end of extension");
 					}
 					total += 2 + len;

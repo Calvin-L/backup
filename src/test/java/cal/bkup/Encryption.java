@@ -146,5 +146,10 @@ public class Encryption {
     public int read(byte[] b, int off, int len) throws IOException {
       return super.read(b, off, Math.min(len, 1));
     }
+
+    @Override
+    public long skip(long n) throws IOException {
+      return super.skip(1);
+    }
   }
 }
