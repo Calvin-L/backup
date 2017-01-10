@@ -22,7 +22,7 @@ public class EncryptedInputStream extends FilterInputStream {
     PipedOutputStream out = new PipedOutputStream((PipedInputStream)in);
     encryptionThread = new Thread(() -> {
       try (PipedOutputStream cpy = out; /* ensure that "out" gets closed */
-           InputStream in = new PoliteInputStream(wrappedStream) /* ensure that "wrappedStream" gets closed */) {
+           InputStream in = wrappedStream /* ensure that "wrappedStream" gets closed */) {
         AESCrypt crypt = new AESCrypt(password);
         crypt.encrypt(AES_VERSION, in, cpy);
       } catch (InterruptedIOException ignored) {

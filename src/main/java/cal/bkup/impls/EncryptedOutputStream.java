@@ -23,10 +23,7 @@ public class EncryptedOutputStream extends FilterOutputStream {
     PipedInputStream in = new PipedInputStream(4096);
     ((PipedOutputStream)out).connect(in);
     encryptionThread = new Thread(() -> {
-      // The AESCrypt class does not respect the number returned by InputStream.read(byte[], ...).
-      // So, we wrap the stream in a "polite" variant that does what it expects. This also ensures
-      // that "in" and "wrappedStream" get closed.
-      try (InputStream cpy = new PoliteInputStream(in);
+      try (InputStream cpy = in; /* ensure that "in" gets closed */
            OutputStream out = wrappedStream) {
         AESCrypt crypt = new AESCrypt(password);
         crypt.encrypt(AES_VERSION, cpy, out);
