@@ -17,7 +17,7 @@ public class DecryptedInputStream extends FilterInputStream {
     try (ByteArrayInputStream in = new ByteArrayInputStream(bytes);
          ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       AESCrypt crypt = new AESCrypt(password);
-      crypt.decrypt(bytes.length, in, out);
+      crypt.decrypt(in, out);
       return out.toByteArray();
     }
   }

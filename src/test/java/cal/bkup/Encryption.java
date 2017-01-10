@@ -121,7 +121,7 @@ public class Encryption {
 
     // Decrypt
     ByteArrayOutputStream decryptedOut = new ByteArrayOutputStream();
-    new AESCrypt(password).decrypt(encrypted.length, new SlowStream(new ByteArrayInputStream(encrypted)), decryptedOut);
+    new AESCrypt(password).decrypt(new SlowStream(new ByteArrayInputStream(encrypted)), decryptedOut);
     String decrypted = new String(decryptedOut.toByteArray(), charset);
 
     Assert.assertEquals(data, decrypted);

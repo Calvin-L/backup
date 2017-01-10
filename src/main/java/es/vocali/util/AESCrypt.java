@@ -408,7 +408,7 @@ public class AESCrypt {
 	 * @throws IOException when there are I/O errors.
 	 * @throws GeneralSecurityException if the platform does not support the required cryptographic methods.
 	 */
-	public void decrypt(long inSize, InputStream in, OutputStream out)
+	public void decrypt(InputStream in, OutputStream out)
 	throws IOException, GeneralSecurityException {
 		try {
 			byte[] text, backup;
