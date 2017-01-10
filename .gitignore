@@ -4,7 +4,6 @@
 /.gradle
 *.jar
 *.class
-/aescrypt-*
 
 # IDEs
 .idea
