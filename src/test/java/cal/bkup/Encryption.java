@@ -92,13 +92,19 @@ public class Encryption {
   public void testEncryptedInputStream1() throws Exception {
     Random random = new Random();
     for (int i = 0; i <= 32; ++i) {
-      byte[] bytes = new byte[i];
-      random.nextBytes(bytes);
-      Assert.assertEquals(
-          DecryptedInputStream.decrypt(
-              new EncryptedInputStream(new SlowStream(new ByteArrayInputStream(bytes)), password),
-              password),
-          bytes);
+      System.out.print("len=" + i + "...");
+      System.out.flush();
+      byte[] bytesExpected = new byte[i];
+      random.nextBytes(bytesExpected);
+      byte[] bytesOut = DecryptedInputStream.decrypt(
+          new EncryptedInputStream(new SlowStream(new ByteArrayInputStream(bytesExpected)), password),
+          password);
+      if (!Arrays.equals(bytesOut, bytesExpected)) {
+        System.out.println(Arrays.toString(bytesOut) + " != " + Arrays.toString(bytesExpected));
+        Assert.assertEquals(bytesOut, bytesExpected);
+      } else {
+        System.out.println(" ok");
+      }
     };
   }
 

@@ -22,6 +22,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PushbackInputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.NetworkInterface;
 import java.security.GeneralSecurityException;
@@ -353,6 +354,51 @@ public class AESCrypt {
 		}
 	}
 
+	private static class BlockWalker {
+		private final PushbackInputStream in;
+		private final int blockLen;
+		private final int maxFooterLen;
+		private final byte[] footerBuffer;
+		private int footerLen;
+
+		public BlockWalker(InputStream in, int blockLen, int maxFooterLen) throws IOException {
+			this.in = new PushbackInputStream(in);
+			this.blockLen = blockLen;
+			this.maxFooterLen = maxFooterLen;
+			footerBuffer = new byte[maxFooterLen];
+			footerLen = tryRead(in, footerBuffer);
+		}
+
+		boolean nextBlock(byte[] buf) throws IOException {
+			assert buf.length >= blockLen;
+
+			// any more?
+			int popped = in.read();
+			if (popped < 0) {
+				return false;
+			}
+			in.unread(popped);
+
+			// read next block
+			System.arraycopy(footerBuffer, 0, buf, 0, blockLen);
+			System.arraycopy(footerBuffer, blockLen, footerBuffer, 0, footerLen - blockLen);
+			footerLen -= blockLen;
+			int nread;
+			while (footerLen < maxFooterLen && (nread = in.read(footerBuffer, footerLen, maxFooterLen - footerLen)) >= 0) {
+				footerLen += nread;
+			}
+			return true;
+		}
+
+		byte[] footer() {
+			return footerBuffer;
+		}
+
+		int footerLen() {
+			return footerLen;
+		}
+	}
+
 	/**
 	 * The input stream is decrypted and saved to the output stream.
 	 * <p>
@@ -366,7 +412,6 @@ public class AESCrypt {
 	throws IOException, GeneralSecurityException {
 		try {
 			byte[] text, backup;
-			long total = 3 + 1 + 1 + BLOCK_SIZE + BLOCK_SIZE + KEY_SIZE + SHA_SIZE + 1 + SHA_SIZE;
 			int version;
 
 			text = new byte[3];
@@ -392,7 +437,6 @@ public class AESCrypt {
 					if (trySkip(in, len) != len) {
 						throw new IOException("Unexpected end of extension");
 					}
-					total += 2 + len;
 					debug("Skipped extension sized: " + len);
 				} while (len != 0);
 			}
@@ -423,40 +467,44 @@ public class AESCrypt {
 			}
 			debug("HMAC1: ", text);
 
-			total = inSize - total;	// Payload size.
-			if (total % BLOCK_SIZE != 0) {
-				throw new IOException("Input file is corrupt");
-			}
-			if (total == 0) {	// Hack: empty files won't enter block-processing for-loop below.
-				in.read();	// Skip last block size mod 16.
-			}
-			debug("Payload size: " + total);
-
 			cipher.init(Cipher.DECRYPT_MODE, aesKey2, ivSpec2);
 			hmac.init(new SecretKeySpec(aesKey2.getEncoded(), HMAC_ALG));
 			backup = new byte[BLOCK_SIZE];
 			text = new byte[BLOCK_SIZE];
-			for (int block = (int) (total / BLOCK_SIZE); block > 0; block--) {
-				int len = BLOCK_SIZE;
-				readBytes(in, backup);
-				cipher.update(backup, 0, len, text);
-				hmac.update(backup, 0, len);
-				if (block == 1) {
-					int last = in.read();	// Last block size mod 16.
-					debug("Last block size mod 16: " + last);
-					len = (last > 0 ? last : BLOCK_SIZE);
+
+			BlockWalker walker = new BlockWalker(in, BLOCK_SIZE, SHA_SIZE + 1);
+			byte[] prev = null;
+			while (walker.nextBlock(backup)) {
+				if (prev != null) {
+					cipher.update(prev, 0, BLOCK_SIZE, text);
+					hmac.update(prev, 0, BLOCK_SIZE);
+					out.write(text);
 				}
+				byte[] tmp = prev;
+				prev = backup;
+				backup = tmp;
+				if (backup == null) {
+					backup = new byte[BLOCK_SIZE];
+				}
+			}
+			byte[] footer = walker.footer();
+			int len = footer[0] > 0 ? footer[0] : BLOCK_SIZE;
+			if (prev != null) {
+				debug("Last block size mod 16: " + footer[0]);
+				cipher.update(prev, 0, BLOCK_SIZE, text);
+				hmac.update(prev, 0, BLOCK_SIZE);
 				out.write(text, 0, len);
 			}
 			out.write(cipher.doFinal());
-
 			backup = hmac.doFinal();
-			text = new byte[SHA_SIZE];
-			readBytes(in, text);	// HMAC and authenticity test.
-			if (!Arrays.equals(backup, text)) {
-				throw new IOException("Message has been altered or password incorrect");
+			if (walker.footerLen() != SHA_SIZE + 1) {
+				throw new IOException("Unexpected end of file");
 			}
-			debug("HMAC2: ", text);
+			for (int i = 0; i < SHA_SIZE; ++i) {
+				if (footer[i+1] != backup[i]) {
+					throw new IOException("Message has been altered or password incorrect");
+				}
+			}
 		} catch (InvalidKeyException e) {
 			throw new GeneralSecurityException(JCE_EXCEPTION_MESSAGE, e);
 		}
