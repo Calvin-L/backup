@@ -2,6 +2,7 @@ package cal.bkup.impls;
 
 import es.vocali.util.AESCrypt;
 
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -12,15 +13,15 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static cal.bkup.impls.EncryptedInputStream.AES_VERSION;
 
-public class EncryptedOutputStream extends OutputStream {
+public class EncryptedOutputStream extends FilterOutputStream {
 
-  private final OutputStream stream;
   private final Thread encryptionThread;
   private final AtomicReference<Throwable> thrownException = new AtomicReference<>(null);
 
   public EncryptedOutputStream(OutputStream wrappedStream, String password) throws IOException {
+    super(new PipedOutputStream());
     PipedInputStream in = new PipedInputStream(4096);
-    stream = new PipedOutputStream(in);
+    ((PipedOutputStream)out).connect(in);
     encryptionThread = new Thread(() -> {
       // The AESCrypt class does not respect the number returned by InputStream.read(byte[], ...).
       // So, we wrap the stream in a "polite" variant that does what it expects. This also ensures
@@ -39,28 +40,8 @@ public class EncryptedOutputStream extends OutputStream {
   }
 
   @Override
-  public void write(byte[] b) throws IOException {
-    stream.write(b);
-  }
-
-  @Override
-  public void write(byte[] b, int off, int len) throws IOException {
-    stream.write(b, off, len);
-  }
-
-  @Override
-  public void flush() throws IOException {
-    stream.flush();
-  }
-
-  @Override
-  public void write(int b) throws IOException {
-    stream.write(b);
-  }
-
-  @Override
   public void close() throws IOException {
-    stream.close();
+    super.close();
     try {
       encryptionThread.join();
     } catch (InterruptedException ignored) {

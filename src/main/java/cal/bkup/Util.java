@@ -2,6 +2,7 @@ package cal.bkup;
 
 import cal.bkup.types.Price;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Console;
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,6 +26,13 @@ public abstract class Util {
       count += n;
     }
     return count;
+  }
+
+  public static byte[] read(InputStream in) throws IOException {
+    try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      copyStream(in, out);
+      return out.toByteArray();
+    }
   }
 
   public static void ensure(boolean b) {

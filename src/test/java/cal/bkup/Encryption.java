@@ -1,7 +1,9 @@
 package cal.bkup;
 
 import cal.bkup.impls.DecryptedInputStream;
+import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.EncryptedOutputStream;
+import com.amazonaws.util.StringInputStream;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -83,4 +85,13 @@ public class Encryption {
     check("aosfha;efhaw;ofn;awegb;awibg;awoehij;awoeijfd;awfi;oawehfgaow;e;aewg");
   }
 
+  @Test
+  public void testEncryptedInputStream() throws Exception {
+    String data = "hello world!";
+    Assert.assertEquals(
+        new String(DecryptedInputStream.decrypt(
+            new EncryptedInputStream(new StringInputStream(data), password),
+            password)),
+        data);
+  }
 }
