@@ -592,7 +592,7 @@ public class Main {
             rules.subList(index + 1, rules.size())
                 .forEach(rr -> {
                   try {
-                    r.destruct(inc -> {}, exclusions::add);
+                    rr.destruct(inc -> {}, exclusions::add);
                   } catch (IOException e) {
                     throw new RuntimeException(e);
                   }
