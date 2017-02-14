@@ -1,8 +1,8 @@
 package cal.bkup;
 
 import cal.bkup.impls.CachedDirectory;
+import cal.bkup.impls.EncryptedBackupTarget;
 import cal.bkup.impls.EncryptedDirectory;
-import cal.bkup.impls.EncryptedInputStream;
 import cal.bkup.impls.FilesystemBackupTarget;
 import cal.bkup.impls.FreeOp;
 import cal.bkup.impls.GlacierBackupTarget;
@@ -10,7 +10,6 @@ import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.XZCompressedDirectory;
-import cal.bkup.types.BackedUpResourceInfo;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
 import cal.bkup.types.Config;
@@ -515,62 +514,7 @@ public class Main {
   }
 
   private static BackupTarget encryptTarget(BackupTarget backupTarget, String password) throws GeneralSecurityException, UnsupportedEncodingException {
-    return new BackupTarget() {
-      @Override
-      public Id name() {
-        return backupTarget.name();
-      }
-
-      @Override
-      public Op<Id> backup(Resource r) throws IOException {
-        return backupTarget.backup(new Resource() {
-          @Override
-          public Id system() {
-            return r.system();
-          }
-
-          @Override
-          public Path path() {
-            return r.path();
-          }
-
-          @Override
-          public Instant modTime() throws IOException {
-            return r.modTime();
-          }
-
-          @Override
-          public InputStream open() throws IOException {
-            try {
-              return new EncryptedInputStream(r.open(), password);
-            } catch (GeneralSecurityException e) {
-              throw new IOException(e);
-            }
-          }
-
-          @Override
-          public long sizeEstimateInBytes() throws IOException {
-            // TODO: can we do better?
-            return r.sizeEstimateInBytes();
-          }
-        });
-      }
-
-      @Override
-      public Stream<BackedUpResourceInfo> list() throws IOException {
-        return backupTarget.list();
-      }
-
-      @Override
-      public Op<Void> delete(BackedUpResourceInfo id) throws IOException {
-        return backupTarget.delete(id);
-      }
-
-      @Override
-      public void close() throws Exception {
-        backupTarget.close();
-      }
-    };
+    return new EncryptedBackupTarget(backupTarget, password);
   }
 
   private static void onError(Exception e) {
