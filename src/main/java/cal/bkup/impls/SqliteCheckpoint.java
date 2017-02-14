@@ -193,6 +193,11 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
             }
 
             @Override
+            public long sizeAtTarget() {
+              return 0; // TODO
+            }
+
+            @Override
             public Id target() {
               return target;
             }

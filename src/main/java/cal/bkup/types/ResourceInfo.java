@@ -9,4 +9,5 @@ public interface ResourceInfo {
   Instant modTime();
   Id target();
   Id idAtTarget();
+  long sizeAtTarget();
 }

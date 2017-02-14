@@ -52,18 +52,22 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -102,6 +106,7 @@ public class Main {
     // actions
     options.addOption("b", "backup", false, "Back up files");
     options.addOption("l", "list", false, "Show inventory of current backup");
+    options.addOption("c", "spot-check", true, "Spot-check N backed-up files");
     options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
 
     CommandLine cli;
@@ -124,6 +129,7 @@ public class Main {
     final boolean gc = cli.hasOption("gc");
     final boolean backup = cli.hasOption("backup");
     final boolean local = cli.hasOption("local");
+    final int numToCheck = cli.hasOption('c') ? Integer.parseInt(cli.getOptionValue('c')) : 0;
     final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
 
     final Config config;
@@ -134,6 +140,8 @@ public class Main {
       System.exit(1);
       return;
     }
+
+    AtomicBoolean success = new AtomicBoolean(true);
 
     if (password != null) {
       if (list) {
@@ -172,6 +180,43 @@ public class Main {
               }
             }
           });
+        }
+
+        if (numToCheck > 0) {
+          List<ResourceInfo> infos = checkpoint.list()
+              .filter(i -> i.system().equals(config.systemName()))
+              .filter(i -> {
+                    try {
+                      return Files.exists(i.path()) && Util.le(Files.getLastModifiedTime(i.path()).toInstant(), i.modTime());
+                    } catch (IOException e) {
+                      return false;
+                    }
+                  }
+              )
+              .collect(Collectors.toCollection(ArrayList::new));
+          Random r = new Random();
+          Collections.shuffle(infos, r);
+          infos = infos.subList(0, Math.min(infos.size(), numToCheck));
+          plan.add(target.fetch(infos, res -> {
+            ResourceInfo i = res.fst;
+            System.out.println("Checking " + i.path() + "...");
+            byte[] remoteSha;
+            try (InputStream in = res.snd) {
+              remoteSha = Util.sha256(in);
+            }
+            byte[] localSha;
+            try (InputStream in = new FileInputStream(i.path().toFile())) {
+              localSha = Util.sha256(in);
+            }
+            if (Arrays.equals(remoteSha, localSha)) {
+              System.out.println("OK!");
+            } else {
+              System.out.println("FAILURE");
+              System.out.println("  Local  SHA256: " + Arrays.toString(localSha));
+              System.out.println("  Remote SHA256: " + Arrays.toString(remoteSha));
+              success.set(false);
+            }
+          }));
         }
 
         System.out.println("Estimating costs...");
@@ -238,6 +283,7 @@ public class Main {
     } else {
       throw new Exception("failed to get password");
     }
+    System.exit(success.get() ? 0 : 1);
   }
 
   private static class RawConfig {

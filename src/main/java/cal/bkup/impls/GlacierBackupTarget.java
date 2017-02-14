@@ -4,10 +4,13 @@ import cal.bkup.AWSTools;
 import cal.bkup.Util;
 import cal.bkup.types.BackedUpResourceInfo;
 import cal.bkup.types.BackupTarget;
+import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
+import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
+import cal.bkup.types.ResourceInfo;
 import com.amazonaws.services.glacier.AmazonGlacier;
 import com.amazonaws.services.glacier.AmazonGlacierClient;
 import com.amazonaws.services.glacier.TreeHashGenerator;
@@ -54,7 +57,11 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 public class GlacierBackupTarget implements BackupTarget {
@@ -74,6 +81,9 @@ public class GlacierBackupTarget implements BackupTarget {
   private static final Duration ONE_MONTH = Duration.of(30, ChronoUnit.DAYS);
   private static final Duration MINIMUM_STORAGE_DURATION = ONE_MONTH.multipliedBy(3);
   private static final BigFraction EARLY_DELETION_FEE_PER_GB_MONTH = PENNIES_PER_GB_MONTH;
+  private static final BigFraction PENNIES_PER_DOWNLOAD_REQ = BigFraction.ZERO;
+  private static final BigFraction PENNIES_PER_DOWNLOAD_GB_REQ = BigFraction.ONE;
+  private static final BigFraction PENNIES_PER_DOWNLOAD_GB_XFER = new BigFraction(9); // assuming <10TB total transfer per month
   private static final BigFraction MONTHS_PER_SECOND = BigFraction.ONE.divide(new BigFraction(ONE_MONTH.get(ChronoUnit.SECONDS)));
 
   private final Id id;
@@ -398,6 +408,81 @@ public class GlacierBackupTarget implements BackupTarget {
       @Override
       public String toString() {
         return "delete archive " + vaultName + '/' + obj.idAtTarget() + " [" + Util.formatSize(obj.sizeInBytes()) + ']';
+      }
+    };
+  }
+
+  @Override
+  public Op<Void> fetch(Collection<ResourceInfo> infos, IOConsumer<Pair<ResourceInfo, InputStream>> callback) throws IOException {
+    long totalBytes = infos.stream().mapToLong(ResourceInfo::sizeAtTarget).sum();
+    return new Op<Void>() {
+      @Override
+      public Price cost() {
+        BigFraction res = (PENNIES_PER_DOWNLOAD_GB_REQ.add(PENNIES_PER_DOWNLOAD_GB_XFER)).multiply(totalBytes);
+        return () -> res;
+      }
+
+      @Override
+      public Price monthlyMaintenanceCost() {
+        return Price.ZERO;
+      }
+
+      @Override
+      public long estimatedDataTransfer() {
+        return totalBytes;
+      }
+
+      @Override
+      public Void exec() throws IOException {
+        Map<ResourceInfo, String> jobs = new HashMap<>();
+        for (ResourceInfo i : infos) {
+          InitiateJobResult initJobRes = client.initiateJob(new InitiateJobRequest()
+              .withVaultName(vaultName)
+              .withJobParameters(new JobParameters()
+                  .withType("archive-retrieval")
+                  .withArchiveId(i.idAtTarget().toString())));
+          String jobId = initJobRes.getJobId();
+          System.out.println("Created new job " + jobId);
+          jobs.put(i, jobId);
+        }
+
+        while (!jobs.isEmpty()) {
+          System.out.println("Waiting on " + jobs.size() + " jobs...");
+          Iterator<Map.Entry<ResourceInfo, String>> it = jobs.entrySet().iterator();
+          while (it.hasNext()) {
+            Map.Entry<ResourceInfo, String> e = it.next();
+            String jobId = e.getValue();
+
+            DescribeJobResult jobInfo = client.describeJob(new DescribeJobRequest()
+                .withVaultName(vaultName)
+                .withJobId(jobId));
+
+            if (jobInfo.getStatusCode().equals(StatusCode.Failed.toString())) {
+              throw new IOException("job " + jobId + " failed");
+            }
+
+            if (jobInfo.isCompleted()) {
+              ResourceInfo i = e.getKey();
+              it.remove();
+              System.out.println("Archive " + i.idAtTarget() + " is available");
+              GetJobOutputResult outputResult = client.getJobOutput(new GetJobOutputRequest()
+                  .withVaultName(vaultName)
+                  .withJobId(jobId));
+              callback.accept(new Pair<>(i, outputResult.getBody()));
+            }
+          }
+          try {
+            Thread.sleep(1000L * 60L * 5L); // sleep 5 minutes
+          } catch (InterruptedException e) {
+            throw new IOException(e);
+          }
+        }
+        return null;
+      }
+
+      @Override
+      public String toString() {
+        return "fetch " + infos.size() + " files";
       }
     };
   }

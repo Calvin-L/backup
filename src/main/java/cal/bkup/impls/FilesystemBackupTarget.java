@@ -3,18 +3,24 @@ package cal.bkup.impls;
 import cal.bkup.Util;
 import cal.bkup.types.BackedUpResourceInfo;
 import cal.bkup.types.BackupTarget;
+import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
+import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
+import cal.bkup.types.ResourceInfo;
 
 import java.io.BufferedOutputStream;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -134,6 +140,25 @@ public class FilesystemBackupTarget implements BackupTarget {
 
   @Override
   public void close() throws Exception {
+  }
+
+  @Override
+  public Op<Void> fetch(Collection<ResourceInfo> infos, IOConsumer<Pair<ResourceInfo, InputStream>> callback) {
+    return new FreeOp<Void>() {
+      @Override
+      public Void exec() throws IOException {
+        for (ResourceInfo i : infos) {
+          Path p = Paths.get(i.idAtTarget().toString());
+          callback.accept(new Pair<>(i, new FileInputStream(p.toFile())));
+        }
+        return null;
+      }
+
+      @Override
+      public String toString() {
+        return "fetch " + infos.size() + " files";
+      }
+    };
   }
 
 }
