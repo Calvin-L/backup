@@ -1,15 +1,23 @@
 package cal.bkup;
 
+import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Price;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Console;
+import java.io.FilterInputStream;
+import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 public abstract class Util {
 
@@ -123,6 +131,38 @@ public abstract class Util {
       md.update(buf, 0, nread);
     }
     return md.digest();
+  }
+
+  public static InputStream createInputStream(IOConsumer<OutputStream> writer) throws IOException {
+    PipedInputStream in = new PipedInputStream(4096);
+    PipedOutputStream out = new PipedOutputStream(in);
+    AtomicReference<Exception> err = new AtomicReference<>(null);
+    Thread t = new Thread(() -> {
+      try {
+        writer.accept(out);
+      } catch (Exception e) {
+        err.set(e);
+      }
+    });
+    t.start();
+
+    return new FilterInputStream(in) {
+      @Override
+      public void close() throws IOException {
+        try {
+          t.interrupt();
+          t.join();
+          Exception e = err.get();
+          if (e != null) {
+            throw new IOException("byte producer failed", e);
+          }
+        } catch (InterruptedException e) {
+          throw new InterruptedIOException();
+        } finally {
+          super.close();
+        }
+      }
+    };
   }
 
 }
