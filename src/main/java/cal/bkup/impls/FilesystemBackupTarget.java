@@ -102,7 +102,7 @@ public class FilesystemBackupTarget implements BackupTarget {
           }
 
           @Override
-          public long sizeInBytes() {
+          public long storedSizeInBytes() {
             try {
               return Files.size(root.resolve(f));
             } catch (IOException e) {

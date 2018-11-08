@@ -3,6 +3,7 @@ package cal.bkup.impls;
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
 import cal.bkup.types.BackedUpResourceInfo;
+import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
@@ -11,6 +12,7 @@ import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.Sha256AndSize;
 import com.amazonaws.services.glacier.AmazonGlacier;
 import com.amazonaws.services.glacier.AmazonGlacierClient;
 import com.amazonaws.services.glacier.TreeHashGenerator;
@@ -35,7 +37,6 @@ import com.amazonaws.services.glacier.model.UploadArchiveRequest;
 import com.amazonaws.services.glacier.model.UploadArchiveResult;
 import com.amazonaws.services.glacier.model.UploadMultipartPartRequest;
 import com.amazonaws.services.glacier.model.UploadMultipartPartResult;
-import com.amazonaws.services.kms.model.UnsupportedOperationException;
 import com.amazonaws.util.BinaryUtils;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -52,6 +53,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -111,12 +113,12 @@ public class GlacierBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<Id> backup(Resource r) throws IOException {
+  public Op<BackupReport> backup(Resource r) throws IOException {
     int chunkSize = 4 * 1024 * 1024; // 4mb
     long nbytes = r.sizeEstimateInBytes();
 
     if (nbytes <= chunkSize * 2) {
-      return new Op<Id>() {
+      return new Op<BackupReport>() {
         @Override
         public Price cost() {
           return () -> PENNIES_PER_UPLOAD_REQ;
@@ -133,10 +135,11 @@ public class GlacierBackupTarget implements BackupTarget {
         }
 
         @Override
-        public Id exec() throws IOException {
+        public BackupReport exec() throws IOException {
           ByteArrayOutputStream buf = new ByteArrayOutputStream();
+          final Sha256AndSize capturedInfo;
           try (InputStream in = r.open()) {
-            Util.copyStream(in, buf);
+            capturedInfo = Util.copyStreamAndCaptureSha256(in, buf);
           }
           byte[] bytes = buf.toByteArray();
 
@@ -147,7 +150,18 @@ public class GlacierBackupTarget implements BackupTarget {
               .withContentLength((long)bytes.length)
               .withBody(new ByteArrayInputStream(bytes));
           UploadArchiveResult res = client.uploadArchive(req);
-          return new Id(res.getArchiveId());
+          Id id = new Id(res.getArchiveId());
+          return new BackupReport() {
+            @Override
+            public long sizeAtTarget() {
+              return capturedInfo.size();
+            }
+
+            @Override
+            public Id idAtTarget() {
+              return id;
+            }
+          };
         }
 
         @Override
@@ -157,7 +171,7 @@ public class GlacierBackupTarget implements BackupTarget {
       };
     }
 
-    return new Op<Id>() {
+    return new Op<BackupReport>() {
       @Override
       public Price cost() {
         return () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(nbytes / chunkSize).add(BigFraction.TWO));
@@ -174,9 +188,10 @@ public class GlacierBackupTarget implements BackupTarget {
       }
 
       @Override
-      public Id exec() throws IOException {
+      public BackupReport exec() throws IOException {
         byte[] chunk = new byte[chunkSize];
         List<byte[]> binaryChecksums = new ArrayList<>();
+        MessageDigest md = Util.sha256Digest();
 
         InitiateMultipartUploadResult init = client.initiateMultipartUpload(
             new InitiateMultipartUploadRequest()
@@ -188,6 +203,7 @@ public class GlacierBackupTarget implements BackupTarget {
         try (InputStream in = r.open()) {
           int n;
           while ((n = readChunk(in, chunk)) > 0) {
+            md.update(chunk, 0, n);
             String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
             binaryChecksums.add(BinaryUtils.fromHex(checksum));
             UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
@@ -211,7 +227,20 @@ public class GlacierBackupTarget implements BackupTarget {
             .withArchiveSize(Long.toString(total));
 
         CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
-        return new Id(compResult.getArchiveId());
+        Id backupId = new Id(compResult.getArchiveId());
+        byte[] sha256 = md.digest();
+        final long finalSize = total;
+        return new BackupReport() {
+          @Override
+          public long sizeAtTarget() {
+            return finalSize;
+          }
+
+          @Override
+          public Id idAtTarget() {
+            return backupId;
+          }
+        };
       }
 
       @Override
@@ -322,14 +351,20 @@ public class GlacierBackupTarget implements BackupTarget {
               Id id = new Id(archiveId);
               long sz = size;
               Instant time = Instant.from(DateTimeFormatter.ISO_INSTANT.parse(creationDate));
+              BackupTarget self = this;
               res.add(new BackedUpResourceInfo() {
+                @Override
+                public BackupTarget target() {
+                  return self;
+                }
+
                 @Override
                 public Id idAtTarget() {
                   return id;
                 }
 
                 @Override
-                public long sizeInBytes() {
+                public long storedSizeInBytes() {
                   return sz;
                 }
 
@@ -381,7 +416,7 @@ public class GlacierBackupTarget implements BackupTarget {
         return earlyDeletion.isNegative() ?
             Price.ZERO :
             () -> EARLY_DELETION_FEE_PER_GB_MONTH
-                .multiply(new BigFraction(obj.sizeInBytes()).add(EXTRA_BYTES_PER_ARCHIVE))
+                .multiply(new BigFraction(obj.storedSizeInBytes()).add(EXTRA_BYTES_PER_ARCHIVE))
                 .multiply(new BigFraction(earlyDeletion.get(ChronoUnit.SECONDS)))
                 .multiply(MONTHS_PER_SECOND)
                 .divide(ONE_GB);
@@ -389,7 +424,7 @@ public class GlacierBackupTarget implements BackupTarget {
 
       @Override
       public Price monthlyMaintenanceCost() {
-        return () -> maintenanceCostForArchive(obj.sizeInBytes()).valueInCents().negate();
+        return () -> maintenanceCostForArchive(obj.storedSizeInBytes()).valueInCents().negate();
       }
 
       @Override
@@ -407,7 +442,7 @@ public class GlacierBackupTarget implements BackupTarget {
 
       @Override
       public String toString() {
-        return "delete archive " + vaultName + '/' + obj.idAtTarget() + " [" + Util.formatSize(obj.sizeInBytes()) + ']';
+        return "delete archive " + vaultName + '/' + obj.idAtTarget() + " [" + Util.formatSize(obj.storedSizeInBytes()) + ']';
       }
     };
   }

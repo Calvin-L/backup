@@ -2,11 +2,11 @@ package cal.bkup;
 
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Price;
+import cal.bkup.types.Sha256AndSize;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Console;
 import java.io.FilterInputStream;
-import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
@@ -17,7 +17,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 public abstract class Util {
 
@@ -43,6 +42,43 @@ public abstract class Util {
       count += n;
     }
     return count;
+  }
+
+  public static MessageDigest sha256Digest() {
+    MessageDigest md;
+    try {
+      md = MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException e) {
+      // This should never happen; all JREs are required to support
+      // SHA-256 (as well as MD5 and SHA-1).
+      throw new UnsupportedOperationException();
+    }
+    return md;
+  }
+
+  public static Sha256AndSize copyStreamAndCaptureSha256(InputStream in, OutputStream out) throws IOException {
+    byte[] buf = MEM_BUFFER.get();
+    long count = 0;
+    int n;
+    MessageDigest md = sha256Digest();
+    while ((n = in.read(buf)) >= 0) {
+      md.update(buf, 0, n);
+      out.write(buf, 0, n);
+      count += n;
+    }
+    final long finalCount = count;
+    final byte[] sha256 = md.digest();
+    return new Sha256AndSize() {
+      @Override
+      public byte[] sha256() {
+        return sha256;
+      }
+
+      @Override
+      public long size() {
+        return finalCount;
+      }
+    };
   }
 
   public static byte[] read(InputStream in) throws IOException {
@@ -117,20 +153,24 @@ public abstract class Util {
   }
 
   public static byte[] sha256(InputStream in) throws IOException {
-    MessageDigest md;
-    try {
-      md = MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      // This should never happen; all JREs are required to support
-      // SHA-256 (as well as MD5 and SHA-1).
-      throw new UnsupportedOperationException();
-    }
+    MessageDigest md = sha256Digest();
     byte[] buf = MEM_BUFFER.get();
     int nread;
     while ((nread = in.read(buf)) >= 0) {
       md.update(buf, 0, nread);
     }
     return md.digest();
+  }
+
+  private static final String HEX_CHARS = "0123456789abcdef";
+  public static String sha256toString(byte[] sha256) {
+    StringBuilder builder = new StringBuilder();
+    for (byte b : sha256) {
+      int i = Byte.toUnsignedInt(b);
+      builder.append(HEX_CHARS.charAt((i >> 4) & 0xF));
+      builder.append(HEX_CHARS.charAt(i & 0xF));
+    }
+    return builder.toString();
   }
 
   public static InputStream createInputStream(IOConsumer<OutputStream> writer) throws IOException {

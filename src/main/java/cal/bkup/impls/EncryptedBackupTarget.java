@@ -1,6 +1,7 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.BackedUpResourceInfo;
+import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
@@ -32,7 +33,7 @@ public class EncryptedBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<Id> backup(Resource r) throws IOException {
+  public Op<BackupReport> backup(Resource r) throws IOException {
     return backupTarget.backup(new Resource() {
       @Override
       public Id system() {

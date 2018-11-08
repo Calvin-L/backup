@@ -9,7 +9,10 @@ import cal.bkup.impls.GlacierBackupTarget;
 import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
+import cal.bkup.impls.SqliteCheckpoint2;
 import cal.bkup.impls.XZCompressedDirectory;
+import cal.bkup.types.BackedUpResourceInfo;
+import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
 import cal.bkup.types.Config;
@@ -17,6 +20,7 @@ import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
 import cal.bkup.types.Price;
+import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Rule;
 import cal.bkup.types.SimpleDirectory;
@@ -133,6 +137,64 @@ public class Main {
     AtomicBoolean success = new AtomicBoolean(true);
 
     if (password != null) {
+      // migrate
+      System.out.println("migrating...");
+      SimpleDirectory dir = checkpointDir(password, local);
+      try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local);
+           Checkpoint ck2 = new SqliteCheckpoint2();
+           BackupTarget target = getBackupTarget(password, local)) {
+        checkpoint.list().forEach(info -> {
+          if (info.system().equals(config.systemName()) && info.target().equals(target.name())) {
+            try {
+              ck2.noteSuccessfulBackup(new Resource() {
+                @Override
+                public Id system() {
+                  return info.system();
+                }
+
+                @Override
+                public Path path() {
+                  return info.path();
+                }
+
+                @Override
+                public Instant modTime() throws IOException {
+                  return info.modTime();
+                }
+
+                @Override
+                public InputStream open() throws IOException {
+                  return new FileInputStream(info.path().toFile());
+                }
+
+                @Override
+                public long sizeEstimateInBytes() throws IOException {
+                  throw new UnsupportedOperationException();
+                }
+              }, new BackupReport() {
+                @Override
+                public BackupTarget target() {
+                  return target;
+                }
+
+                @Override
+                public Id idAtTarget() {
+                  return info.idAtTarget();
+                }
+
+                @Override
+                public long sizeAtTarget() {
+                  return info.sizeAtTarget();
+                }
+              });
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          }
+        });
+        ck2.save(dir.createOrReplace(Instant.now().toEpochMilli() + ".index"));
+      }
+
       if (list) {
         try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local)) {
           checkpoint.list().forEach(info -> {
@@ -244,7 +306,7 @@ public class Main {
                     synchronized (checkpoint) {
                       Instant lastSave = checkpoint.lastSave();
                       if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
-                        checkpoint.save();
+                        checkpoint.save(null /* todo */);
                       }
                     }
                   }
@@ -260,7 +322,7 @@ public class Main {
             long nbkup = numSuccessful.get();
             System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
             if (backup) {
-              checkpoint.save();
+              checkpoint.save(null /* todo */);
             }
           }
         } else {
@@ -392,7 +454,7 @@ public class Main {
           presentFiles.add(resource.path());
           Instant checkpointModTime = checkpoint.modTime(resource, target);
           if (checkpointModTime == null || resource.modTime().compareTo(checkpointModTime) > 0) {
-            Op<Id> op = target.backup(resource);
+            Op<BackupReport> op = target.backup(resource);
             ops.add(new Op<Void>() {
 
               @Override
@@ -412,7 +474,7 @@ public class Main {
 
               @Override
               public Void exec() throws IOException {
-                checkpoint.noteSuccessfulBackup(resource, target, op.exec());
+                checkpoint.noteSuccessfulBackup(resource, op.exec());
                 return null;
               }
 
@@ -483,13 +545,17 @@ public class Main {
     return ops.stream().filter(Objects::nonNull);
   }
 
+  private static SimpleDirectory checkpointDir(String password, boolean local) {
+    Path cacheLoc = Paths.get("/tmp/s3cache");
+    return local ?
+        new XZCompressedDirectory(new EncryptedDirectory(LocalDirectory.TMP, password)) :
+        new XZCompressedDirectory(new EncryptedDirectory(new CachedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT), cacheLoc), password));
+  }
+
   private static Checkpoint findMostRecentCheckpoint(String password, boolean local) throws IOException {
     System.out.println("Fetching checkpoint...");
+    SimpleDirectory dir = checkpointDir(password, local);
     try {
-      Path cacheLoc = Paths.get("/tmp/s3cache");
-      SimpleDirectory dir = local ?
-          new XZCompressedDirectory(new EncryptedDirectory(LocalDirectory.TMP, password)) :
-          new XZCompressedDirectory(new EncryptedDirectory(new CachedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT), cacheLoc), password));
       return new SqliteCheckpoint(dir);
     } catch (SQLException e) {
       throw new IOException(e);

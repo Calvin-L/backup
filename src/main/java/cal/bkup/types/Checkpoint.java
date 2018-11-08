@@ -1,9 +1,12 @@
 package cal.bkup.types;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.stream.Stream;
+
+import static java.awt.SystemColor.info;
 
 public interface Checkpoint extends AutoCloseable {
 
@@ -15,7 +18,7 @@ public interface Checkpoint extends AutoCloseable {
 
   Instant lastSave();
 
-  void noteSuccessfulBackup(Resource r, BackupTarget target, Id asId) throws IOException;
+  void noteSuccessfulBackup(Resource r, BackupReport report) throws IOException;
   void noteSymLink(Id system, SymLink link) throws IOException;
   void noteHardLink(Id systemId, HardLink hardlink) throws IOException;
 
@@ -23,7 +26,7 @@ public interface Checkpoint extends AutoCloseable {
   void forgetSymLink(Id system, Path p) throws IOException;
   void forgetHardLink(Id system, Path p) throws IOException;
 
-  void save() throws IOException;
+  void save(OutputStream out) throws IOException;
 
   Stream<ResourceInfo> list() throws IOException;
   Stream<SymLink> symlinks(Id system) throws IOException;

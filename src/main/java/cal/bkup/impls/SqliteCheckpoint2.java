@@ -8,12 +8,9 @@ import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
-import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 
-import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -29,20 +26,19 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalLong;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
+import static java.awt.SystemColor.info;
+
+public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 
   private static final String EXTENSION = ".backupdb";
 
-  private SimpleDirectory dir;
   private final Path file;
   private volatile Long lastSave;
   private Connection conn;
   private PreparedStatement queryModTime;
+  private PreparedStatement insertBlobRecord;
   private PreparedStatement insertFileRecord;
   private PreparedStatement queryAll;
   private PreparedStatement insertSymLink;
@@ -53,30 +49,9 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement deleteSymLink;
   private PreparedStatement deleteHardLink;
 
-  public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
-    dir = location;
-
-    Pattern p = Pattern.compile("^(\\d+)" + Pattern.quote(EXTENSION) + "$");
-    OptionalLong max = location.list()
-        .map(p::matcher)
-        .filter(Matcher::find)
-        .mapToLong(m -> Long.parseLong(m.group(1)))
-        .max();
-
+  public SqliteCheckpoint2() throws SQLException, IOException {
     file = Files.createTempFile("backup", "db");
-    System.out.println("Using SQLite file " + file);
-    if (max.isPresent()) {
-      try (InputStream in = location.open(max.getAsLong() + EXTENSION);
-          OutputStream out = new BufferedOutputStream(new FileOutputStream(file.toString()))) {
-        Util.copyStream(in, out);
-      }
-      lastSave = max.getAsLong();
-      System.out.println("Loaded checkpoint " + lastSave);
-    } else {
-      lastSave = null;
-      System.out.println("Created new checkpoint");
-    }
-
+    System.out.println("Created new checkpoint at " + file);
     reopen();
   }
 
@@ -106,12 +81,21 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
   @Override
   public synchronized void noteSuccessfulBackup(Resource r, BackupReport report) throws IOException {
+    String sha256 = Util.sha256toString(report.sha256());
+//    BackedUpResourceInfo info = report.infoAtTarget();
+//    Resource r = report.resourceBackedUp();
     try {
+      insertBlobRecord.setString(1, sha256);
+      insertBlobRecord.setLong(2, report.sizeAtTarget());
+      insertBlobRecord.setLong(3, info.storedSizeInBytes());
+      insertBlobRecord.setString(4, report.target().name().toString());
+      insertBlobRecord.setString(5, info.idAtTarget().toString());
+      insertBlobRecord.executeUpdate();
+
       insertFileRecord.setString(1, r.system().toString());
       insertFileRecord.setString(2, r.path().toString());
       insertFileRecord.setLong(3, r.modTime().toEpochMilli());
-      insertFileRecord.setString(4, report.target().name().toString());
-      insertFileRecord.setString(5, report.idAtTarget().toString());
+      insertFileRecord.setString(4, sha256);
       insertFileRecord.executeUpdate();
     } catch (SQLException e) {
       throw new IOException(e);
@@ -142,23 +126,20 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     }
   }
 
-  protected synchronized void save(boolean reopen) throws IOException, SQLException {
-    long timestamp = Instant.now().toEpochMilli();
-    System.out.println("Saving checkpoint [" + timestamp + ']');
-    close();
-    try (InputStream reader = new FileInputStream(file.toString());
-         OutputStream writer = dir.createOrReplace(timestamp + EXTENSION)) {
-      Util.copyStream(reader, writer);
-    }
-    if (reopen) reopen();
-    lastSave = timestamp;
-    System.out.println("Checkpointed!");
-  }
-
   @Override
   public void save(OutputStream out) throws IOException {
     try {
-      save(true);
+      synchronized (this) {
+        long timestamp = Instant.now().toEpochMilli();
+        System.out.println("Saving checkpoint [" + timestamp + ']');
+        close();
+        try (InputStream reader = new FileInputStream(file.toString())) {
+          Util.copyStream(reader, out);
+        }
+        reopen();
+        lastSave = timestamp;
+        System.out.println("Checkpointed!");
+      }
     } catch (SQLException e) {
       throw new IOException(e);
     }
@@ -332,31 +313,25 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     conn.setAutoCommit(false);
 
     try (Statement init = conn.createStatement()) {
-      init.execute("CREATE TABLE IF NOT EXISTS files (system TEXT, file TEXT, ms_since_unix_epoch INT, target TEXT, id TEXT)");
-      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_idx ON files (system, file, target)");
+      init.execute("CREATE TABLE IF NOT EXISTS blobs (sha256 TEXT PRIMARY KEY, num_bytes INT, num_bytes_at_target INT, target TEXT, id TEXT) WITHOUT ROWID");
+      init.execute("CREATE TABLE IF NOT EXISTS files (system TEXT, file TEXT, ms_since_unix_epoch INT, sha256 TEXT)");
       init.execute("CREATE TABLE IF NOT EXISTS symlinks (system TEXT, src TEXT, dst TEXT)");
-      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS symlink_idx ON symlinks (system, src)");
       init.execute("CREATE TABLE IF NOT EXISTS hardlinks (system TEXT, src TEXT, dst TEXT)");
-      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS hardlink_idx ON hardlinks (system, src)");
     }
     conn.commit();
 
-    queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
-    queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files");
+    queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256 WHERE system=? AND file=? AND target=? LIMIT 1");
+    queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
-    insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");
+    insertBlobRecord = conn.prepareStatement("INSERT OR REPLACE INTO blobs (sha256, num_bytes, num_bytes_at_target, target, id) VALUES (?, ?, ?, ?, ?)");
+    insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, sha256) VALUES (?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
     insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");
     deleteFileRecord = conn.prepareStatement("DELETE FROM files WHERE system=? AND file=?");
     deleteSymLink = conn.prepareStatement("DELETE FROM symlinks WHERE system=? AND src=?");
     deleteHardLink = conn.prepareStatement("DELETE FROM hardlinks WHERE system=? AND src=?");
 
-  }
-
-  public void moveTo(SimpleDirectory dir) throws IOException, SQLException {
-    this.dir = dir;
-    save(true);
   }
 
 }
