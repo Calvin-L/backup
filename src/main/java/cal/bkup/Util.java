@@ -103,9 +103,9 @@ public abstract class Util {
     if (cons == null) {
       throw new IllegalStateException("not connected to console");
     }
-    char[] c1 = cons.readPassword("[%s]", "Password:");
+    char[] c1 = cons.readPassword("%s", "Password for encryption: ");
     if (c1 == null) return null;
-    char[] c2 = cons.readPassword("[%s]", "Confirm:");
+    char[] c2 = cons.readPassword("%s", "Confirm: ");
     if (c2 == null) return null;
     if (!Arrays.equals(c1, c2)) {
       System.err.println("passwords do not match");

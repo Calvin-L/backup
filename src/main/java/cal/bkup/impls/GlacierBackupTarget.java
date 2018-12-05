@@ -116,6 +116,7 @@ public class GlacierBackupTarget implements BackupTarget {
   public Op<BackupReport> backup(Resource r) throws IOException {
     int chunkSize = 4 * 1024 * 1024; // 4mb
     long nbytes = r.sizeEstimateInBytes();
+    final BackupTarget target = this;
 
     if (nbytes <= chunkSize * 2) {
       return new Op<BackupReport>() {
@@ -158,8 +159,24 @@ public class GlacierBackupTarget implements BackupTarget {
             }
 
             @Override
+            public BackupTarget target() {
+              return target;
+            }
+
+            @Override
+            public byte[] sha256() {
+              return capturedInfo.sha256();
+            }
+
+            @Override
             public Id idAtTarget() {
               return id;
+            }
+
+            @Override
+            public long size() {
+              // TODO: not allowed to know this (leakage)
+              throw new UnsupportedOperationException();
             }
           };
         }
@@ -237,8 +254,23 @@ public class GlacierBackupTarget implements BackupTarget {
           }
 
           @Override
+          public BackupTarget target() {
+            return target;
+          }
+
+          @Override
+          public byte[] sha256() {
+            return sha256;
+          }
+
+          @Override
           public Id idAtTarget() {
             return backupId;
+          }
+
+          @Override
+          public long size() {
+            throw new UnsupportedOperationException();
           }
         };
       }

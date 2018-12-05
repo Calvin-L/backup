@@ -178,8 +178,18 @@ public class Main {
                 }
 
                 @Override
+                public byte[] sha256() {
+                  return null;
+                }
+
+                @Override
                 public Id idAtTarget() {
                   return info.idAtTarget();
+                }
+
+                @Override
+                public long size() {
+                  return info.sizeAtTarget();
                 }
 
                 @Override

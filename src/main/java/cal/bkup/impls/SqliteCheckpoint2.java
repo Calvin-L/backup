@@ -86,10 +86,10 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 //    Resource r = report.resourceBackedUp();
     try {
       insertBlobRecord.setString(1, sha256);
-      insertBlobRecord.setLong(2, report.sizeAtTarget());
-      insertBlobRecord.setLong(3, info.storedSizeInBytes());
+      insertBlobRecord.setLong(2, report.size());
+      insertBlobRecord.setLong(3, report.sizeAtTarget());
       insertBlobRecord.setString(4, report.target().name().toString());
-      insertBlobRecord.setString(5, info.idAtTarget().toString());
+      insertBlobRecord.setString(5, report.idAtTarget().toString());
       insertBlobRecord.executeUpdate();
 
       insertFileRecord.setString(1, r.system().toString());

@@ -2,6 +2,7 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackedUpResourceInfo;
+import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
@@ -10,6 +11,7 @@ import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.Sha256AndSize;
 
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
@@ -40,9 +42,10 @@ public class FilesystemBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<Id> backup(Resource r) throws IOException {
+  public Op<BackupReport> backup(Resource r) throws IOException {
     long size = r.sizeEstimateInBytes();
-    return new Op<Id>() {
+    final BackupTarget target = this;
+    return new Op<BackupReport>() {
       @Override
       public Price cost() {
         return Price.ZERO;
@@ -59,20 +62,48 @@ public class FilesystemBackupTarget implements BackupTarget {
       }
 
       @Override
-      public Id exec() throws IOException {
+      public BackupReport exec() throws IOException {
         Path dst = root.resolve(UUID.randomUUID().toString());
         if (Files.exists(dst)) {
           throw new IOException("refusing to overwrite " + dst);
         }
         Files.createDirectories(dst.getParent());
         FileOutputStream openFile = new FileOutputStream(dst.toString());
+        final Sha256AndSize copyResult;
         try (BufferedOutputStream out = new BufferedOutputStream(openFile);
              InputStream in = r.open()) {
-          Util.copyStream(in, out);
+          copyResult = Util.copyStreamAndCaptureSha256(in, out);
           out.flush();
           openFile.getFD().sync();
+          // TODO: sync parent folder too!
         }
-        return new Id(dst.toString());
+        final Id id = new Id(dst.toString());
+        return new BackupReport() {
+          @Override
+          public BackupTarget target() {
+            return target;
+          }
+
+          @Override
+          public byte[] sha256() {
+            return copyResult.sha256();
+          }
+
+          @Override
+          public Id idAtTarget() {
+            return id;
+          }
+
+          @Override
+          public long size() {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public long sizeAtTarget() {
+            return copyResult.size();
+          }
+        };
       }
 
       @Override
@@ -84,6 +115,7 @@ public class FilesystemBackupTarget implements BackupTarget {
 
   @Override
   public Stream<BackedUpResourceInfo> list() throws IOException {
+    final BackupTarget target = this;
     return Files.list(root)
         .map(Path::getFileName)
         .map(Object::toString)
@@ -96,6 +128,11 @@ public class FilesystemBackupTarget implements BackupTarget {
           }
         })
         .map(f -> new BackedUpResourceInfo() {
+          @Override
+          public BackupTarget target() {
+            return target;
+          }
+
           @Override
           public Id idAtTarget() {
             return new Id(f);
