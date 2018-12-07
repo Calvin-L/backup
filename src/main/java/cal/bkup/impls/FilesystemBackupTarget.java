@@ -63,7 +63,9 @@ public class FilesystemBackupTarget implements BackupTarget {
 
       @Override
       public BackupReport exec() throws IOException {
-        Path dst = root.resolve(UUID.randomUUID().toString());
+        String uuid = UUID.randomUUID().toString();
+        String prefix = uuid.substring(0, 2);
+        Path dst = root.resolve(prefix).resolve(uuid);
         if (Files.exists(dst)) {
           throw new IOException("refusing to overwrite " + dst);
         }
