@@ -28,6 +28,11 @@ public class LocalDirectory implements SimpleDirectory {
   }
 
   @Override
+  public OutputStream create(String name) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public OutputStream createOrReplace(String name) throws IOException {
     return new FileOutputStream(dir.resolve(name).toString());
   }

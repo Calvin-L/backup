@@ -5,6 +5,7 @@ import cal.bkup.types.SimpleDirectory;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.model.ObjectListing;
+import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 
 import java.io.FileOutputStream;
@@ -76,6 +77,11 @@ public class S3Directory implements SimpleDirectory {
         return DISTINCT | NONNULL | IMMUTABLE;
       }
     }, false);
+  }
+
+  @Override
+  public OutputStream create(String name) throws IOException {
+    throw new UnsupportedOperationException();
   }
 
   @Override

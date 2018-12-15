@@ -24,6 +24,11 @@ public class EncryptedDirectory implements SimpleDirectory {
   }
 
   @Override
+  public OutputStream create(String name) throws IOException {
+    return new EncryptedOutputStream(wrapped.create(name), password);
+  }
+
+  @Override
   public OutputStream createOrReplace(String name) throws IOException {
     return new EncryptedOutputStream(wrapped.createOrReplace(name), password);
   }

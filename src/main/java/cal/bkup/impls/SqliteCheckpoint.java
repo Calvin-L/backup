@@ -4,8 +4,10 @@ import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
+import cal.bkup.types.CheckpointFormat;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
+import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.SimpleDirectory;
@@ -36,11 +38,39 @@ import java.util.stream.Stream;
 
 public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
-  private static final String EXTENSION = ".backupdb";
+  public static final CheckpointFormat FORMAT = new CheckpointFormat() {
+    @Override
+    public String name() {
+      return "SQLite (old)";
+    }
 
-  private SimpleDirectory dir;
+    @Override
+    public Checkpoint createEmpty() throws IOException {
+      try {
+        return new SqliteCheckpoint();
+      } catch (SQLException e) {
+        throw new IOException(e);
+      }
+    }
+
+    @Override
+    public Checkpoint tryRead(InputStream in) throws IOException, IncorrectFormatException {
+      SqliteCheckpoint result;
+      try {
+        result = new SqliteCheckpoint(in);
+      } catch (SQLException e) {
+        throw new IOException(e);
+      }
+      return result;
+    }
+
+    @Override
+    public Checkpoint migrateFrom(Checkpoint result) {
+      throw new UnsupportedOperationException();
+    }
+  };
+
   private final Path file;
-  private volatile Long lastSave;
   private Connection conn;
   private PreparedStatement queryModTime;
   private PreparedStatement insertFileRecord;
@@ -53,31 +83,24 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement deleteSymLink;
   private PreparedStatement deleteHardLink;
 
-  public SqliteCheckpoint(SimpleDirectory location) throws SQLException, IOException {
-    dir = location;
-
-    Pattern p = Pattern.compile("^(\\d+)" + Pattern.quote(EXTENSION) + "$");
-    OptionalLong max = location.list()
-        .map(p::matcher)
-        .filter(Matcher::find)
-        .mapToLong(m -> Long.parseLong(m.group(1)))
-        .max();
-
+  private SqliteCheckpoint() throws IOException, SQLException {
     file = Files.createTempFile("backup", "db");
     System.out.println("Using SQLite file " + file);
-    if (max.isPresent()) {
-      try (InputStream in = location.open(max.getAsLong() + EXTENSION);
-          OutputStream out = new BufferedOutputStream(new FileOutputStream(file.toString()))) {
-        Util.copyStream(in, out);
-      }
-      lastSave = max.getAsLong();
-      System.out.println("Loaded checkpoint " + lastSave);
-    } else {
-      lastSave = null;
-      System.out.println("Created new checkpoint");
-    }
-
     reopen();
+  }
+
+  private SqliteCheckpoint(InputStream in) throws SQLException, IOException, IncorrectFormatException {
+    file = Files.createTempFile("backup", "db");
+    System.out.println("Using SQLite file " + file);
+    try (OutputStream out = new BufferedOutputStream(new FileOutputStream(file.toString()))) {
+      Util.copyStream(in, out);
+    }
+    reopen();
+    checkFormat();
+  }
+
+  private void checkFormat() throws IncorrectFormatException {
+    throw new UnsupportedOperationException();
   }
 
   @Override
@@ -100,8 +123,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
   @Override
   public Instant lastSave() {
-    Long ls = lastSave; // capture volatile var
-    return ls != null ? Instant.ofEpochMilli(ls) : null;
+    throw new UnsupportedOperationException();
   }
 
   @Override
@@ -142,23 +164,20 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     }
   }
 
-  protected synchronized void save(boolean reopen) throws IOException, SQLException {
-    long timestamp = Instant.now().toEpochMilli();
-    System.out.println("Saving checkpoint [" + timestamp + ']');
+  private synchronized void save(OutputStream out, boolean reopen) throws IOException, SQLException {
     close();
-    try (InputStream reader = new FileInputStream(file.toString());
-         OutputStream writer = dir.createOrReplace(timestamp + EXTENSION)) {
-      Util.copyStream(reader, writer);
+    try (InputStream reader = new FileInputStream(file.toString())) {
+      Util.copyStream(reader, out);
     }
-    if (reopen) reopen();
-    lastSave = timestamp;
-    System.out.println("Checkpointed!");
+    if (reopen) {
+      reopen();
+    }
   }
 
   @Override
   public void save(OutputStream out) throws IOException {
     try {
-      save(true);
+      save(out,true);
     } catch (SQLException e) {
       throw new IOException(e);
     }
@@ -352,11 +371,6 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     deleteSymLink = conn.prepareStatement("DELETE FROM symlinks WHERE system=? AND src=?");
     deleteHardLink = conn.prepareStatement("DELETE FROM hardlinks WHERE system=? AND src=?");
 
-  }
-
-  public void moveTo(SimpleDirectory dir) throws IOException, SQLException {
-    this.dir = dir;
-    save(true);
   }
 
 }

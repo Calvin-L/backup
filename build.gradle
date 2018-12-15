@@ -28,6 +28,7 @@ dependencies {
     compile "com.fasterxml.jackson.core:jackson-core:2.8.5"
     compile "org.apache.commons:commons-math3:3.6.1"
     compile "org.apache.commons:commons-compress:1.13"
+    compile "com.google.code.findbugs:jsr305:3.0.2"
     testCompile "org.testng:testng:6.10"
 }
 

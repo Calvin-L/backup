@@ -1,12 +1,11 @@
 package cal.bkup.types;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.stream.Stream;
-
-import static java.awt.SystemColor.info;
 
 public interface Checkpoint extends AutoCloseable {
 
@@ -14,7 +13,7 @@ public interface Checkpoint extends AutoCloseable {
    * @param r the resource to check
    * @return last modification time of <code>r</code>, or <code>null</code> if <code>r</code> is not backed up
    */
-  Instant modTime(Resource r, BackupTarget target);
+  @Nullable Instant modTime(Resource r, BackupTarget target);
 
   Instant lastSave();
 

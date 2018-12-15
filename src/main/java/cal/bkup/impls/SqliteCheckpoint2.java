@@ -4,13 +4,18 @@ import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
+import cal.bkup.types.CheckpointFormat;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
+import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 
+import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -32,10 +37,97 @@ import static java.awt.SystemColor.info;
 
 public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 
-  private static final String EXTENSION = ".backupdb";
+  public static final CheckpointFormat FORMAT = new CheckpointFormat() {
+    @Override
+    public String name() {
+      return "SQLite";
+    }
+
+    @Override
+    public Checkpoint createEmpty() throws IOException {
+      try {
+        return new SqliteCheckpoint2();
+      } catch (SQLException e) {
+        throw new IOException(e);
+      }
+    }
+
+    @Override
+    public Checkpoint tryRead(InputStream in) throws IOException, IncorrectFormatException {
+      SqliteCheckpoint2 result;
+      try {
+        result = new SqliteCheckpoint2(in);
+      } catch (SQLException e) {
+        throw new IOException(e);
+      }
+      return result;
+    }
+
+    @Override
+    public Checkpoint migrateFrom(Checkpoint oldCheckpoint) throws IOException {
+      Checkpoint ck2 = createEmpty();
+      oldCheckpoint.list().forEach(info -> {
+        try {
+          ck2.noteSuccessfulBackup(new Resource() {
+            @Override
+            public Id system() {
+              return info.system();
+            }
+
+            @Override
+            public Path path() {
+              return info.path();
+            }
+
+            @Override
+            public Instant modTime() {
+              return info.modTime();
+            }
+
+            @Override
+            public InputStream open() throws IOException {
+              return new FileInputStream(info.path().toFile());
+            }
+
+            @Override
+            public long sizeEstimateInBytes() {
+              throw new UnsupportedOperationException();
+            }
+          }, new BackupReport() {
+            @Override
+            public BackupTarget target() {
+              throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public byte[] sha256() {
+              return null;
+            }
+
+            @Override
+            public Id idAtTarget() {
+              return info.idAtTarget();
+            }
+
+            @Override
+            public long size() {
+              return info.sizeAtTarget();
+            }
+
+            @Override
+            public long sizeAtTarget() {
+              return info.sizeAtTarget();
+            }
+          });
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      });
+      return ck2;
+    }
+  };
 
   private final Path file;
-  private volatile Long lastSave;
   private Connection conn;
   private PreparedStatement queryModTime;
   private PreparedStatement insertBlobRecord;
@@ -49,10 +141,24 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   private PreparedStatement deleteSymLink;
   private PreparedStatement deleteHardLink;
 
-  public SqliteCheckpoint2() throws SQLException, IOException {
+  private SqliteCheckpoint2() throws SQLException, IOException {
     file = Files.createTempFile("backup", "db");
     System.out.println("Created new checkpoint at " + file);
     reopen();
+  }
+
+  private SqliteCheckpoint2(InputStream in) throws IOException, SQLException, IncorrectFormatException {
+    file = Files.createTempFile("backup", "db");
+    System.out.println("Using SQLite file " + file);
+    try (OutputStream out = new BufferedOutputStream(new FileOutputStream(file.toString()))) {
+      Util.copyStream(in, out);
+    }
+    reopen();
+    checkFormat();
+  }
+
+  private void checkFormat() throws IncorrectFormatException {
+    throw new UnsupportedOperationException();
   }
 
   @Override
@@ -75,8 +181,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 
   @Override
   public Instant lastSave() {
-    Long ls = lastSave; // capture volatile var
-    return ls != null ? Instant.ofEpochMilli(ls) : null;
+    throw new UnsupportedOperationException();
   }
 
   @Override
@@ -137,7 +242,6 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
           Util.copyStream(reader, out);
         }
         reopen();
-        lastSave = timestamp;
         System.out.println("Checkpointed!");
       }
     } catch (SQLException e) {

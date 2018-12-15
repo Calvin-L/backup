@@ -16,6 +16,7 @@ import java.io.PipedOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public abstract class Util {
@@ -203,6 +204,17 @@ public abstract class Util {
         }
       }
     };
+  }
+
+  public static long maximum(long[] array) throws NoSuchElementException {
+    if (array.length == 0) {
+      throw new NoSuchElementException();
+    }
+    long result = array[0];
+    for (int i = 1; i < array.length; ++i) {
+      result = Math.max(result, array[i]);
+    }
+    return result;
   }
 
 }
