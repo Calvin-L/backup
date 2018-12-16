@@ -172,8 +172,6 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   @Override
   public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
     String sha256 = Util.sha256toString(contentSummary.sha256());
-//    BackedUpResourceInfo info = report.infoAtTarget();
-//    Resource r = report.resourceBackedUp();
     try {
       insertBlobRecord.setString(1, sha256);
       insertBlobRecord.setLong(2, contentSummary.size());
@@ -406,6 +404,10 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
       init.execute("CREATE TABLE IF NOT EXISTS files (system TEXT, file TEXT, ms_since_unix_epoch INT, sha256 TEXT)");
       init.execute("CREATE TABLE IF NOT EXISTS symlinks (system TEXT, src TEXT, dst TEXT)");
       init.execute("CREATE TABLE IF NOT EXISTS hardlinks (system TEXT, src TEXT, dst TEXT)");
+
+      // unique indexes
+      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS blob_hashes ON blobs (sha256, target)");
+      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_index ON files (system, file)");
     }
     conn.commit();
 

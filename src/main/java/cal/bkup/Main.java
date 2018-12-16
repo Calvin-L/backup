@@ -411,7 +411,8 @@ public class Main {
         resource -> {
           presentFiles.add(resource.path());
           Instant checkpointModTime = checkpoint.modTime(resource, target);
-          if (checkpointModTime == null || resource.modTime().compareTo(checkpointModTime) > 0) {
+          Instant resourceModTime = resource.modTime();
+          if (checkpointModTime == null || !Objects.equals(checkpointModTime, resourceModTime)) {
             long estimatedSize = resource.sizeEstimateInBytes();
             ops.add(new Op<Void>() {
               @Override
@@ -453,7 +454,7 @@ public class Main {
 
               @Override
               public String toString() {
-                return resource.path().toString();
+                return resource.path().toString() + " [" + checkpointModTime + " --> " + resourceModTime + ']';
               }
             });
           } else {
