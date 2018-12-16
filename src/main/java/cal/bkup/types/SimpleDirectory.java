@@ -29,17 +29,6 @@ public interface SimpleDirectory {
   OutputStream createOrReplace(String name) throws IOException;
 
   /**
-   * Open an output stream to create an entry.
-   * Identical to {@link #createOrReplace(String)}, but
-   * the stream cannot be closed successfully if
-   * another entry exists with the same name.
-   * @param name the name of the entry
-   * @return an output stream to write to
-   * @throws IOException if the stream cannot be opened
-   */
-  OutputStream create(String name) throws IOException;
-
-  /**
    * Open an entry for reading.
    * @param name the entry to read
    * @return a stream to read from

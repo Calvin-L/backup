@@ -144,7 +144,11 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   }
 
   private void checkFormat() throws IncorrectFormatException {
-    throw new UnsupportedOperationException();
+    try {
+      list();
+    } catch (IOException e) {
+      throw new IncorrectFormatException(e.getMessage());
+    }
   }
 
   @Override
@@ -163,11 +167,6 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
       throw new RuntimeException(e);
     }
     return null;
-  }
-
-  @Override
-  public Instant lastSave() {
-    throw new UnsupportedOperationException();
   }
 
   @Override

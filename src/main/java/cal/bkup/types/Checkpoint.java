@@ -15,8 +15,6 @@ public interface Checkpoint extends AutoCloseable {
    */
   @Nullable Instant modTime(Resource r, BackupTarget target);
 
-  Instant lastSave();
-
   void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException;
   void noteSymLink(Id system, SymLink link) throws IOException;
   void noteHardLink(Id systemId, HardLink hardlink) throws IOException;

@@ -33,21 +33,6 @@ public class CachedDirectory implements SimpleDirectory {
   }
 
   @Override
-  public OutputStream create(String name) throws IOException {
-    Path loc = find(name);
-    return new FileOutputStream(loc.toString()) {
-      @Override
-      public void close() throws IOException {
-        super.close();
-        try (OutputStream copyTo = wrapped.create(name);
-             InputStream copyFrom = new FileInputStream(loc.toString())) {
-          Util.copyStream(copyFrom, copyTo);
-        }
-      }
-    };
-  }
-
-  @Override
   public OutputStream createOrReplace(String name) throws IOException {
     Path loc = find(name);
     return new FileOutputStream(loc.toString()) {

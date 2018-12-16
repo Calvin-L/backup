@@ -41,6 +41,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -66,6 +67,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -141,11 +143,12 @@ public class Main {
     AtomicBoolean success = new AtomicBoolean(true);
 
     if (password != null) {
+      CheckpointSequence checkpointHistory = checkpoints(password, local);
 
       if (list) {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local)) {
+        try (Checkpoint checkpoint = findMostRecentCheckpoint(checkpointHistory)) {
           checkpoint.list().forEach(info -> {
-            System.out.println("/" + info.system() + info.path() + " [" + info.target() + '/' + info.idAtTarget() + '/' + info.modTime() + ']');
+            System.out.println("/" + info.system() + info.path() + " [" + info.target() + '|' + info.idAtTarget() + '|' + info.modTime() + ']');
           });
           checkpoint.symlinks(config.systemName()).forEach(link -> {
             System.out.println("/" + link.src() + " [SOFT] ----> " + link.dst());
@@ -156,7 +159,7 @@ public class Main {
         }
       }
 
-      try (Checkpoint checkpoint = findMostRecentCheckpoint(password, local);
+      try (Checkpoint checkpoint = findMostRecentCheckpoint(checkpointHistory);
            BackupTarget target = getBackupTarget(password, local)) {
 
         System.out.println("Planning...");
@@ -241,6 +244,7 @@ public class Main {
             AtomicLong done = new AtomicLong(0);
 
             Instant start = Instant.now();
+            AtomicReference<Instant> lastSaveRef = new AtomicReference<>(start);
             for (Op<?> op : plan) {
               System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
               executor.execute(() -> {
@@ -250,10 +254,14 @@ public class Main {
                   System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
                   numSuccessful.incrementAndGet();
                   if (backup) {
+                    Instant now = Instant.now();
+                    Instant lastSave = lastSaveRef.get();
                     synchronized (checkpoint) {
-                      Instant lastSave = checkpoint.lastSave();
-                      if (lastSave == null || max(lastSave, start).isBefore(Instant.now().minus(5, ChronoUnit.MINUTES))) {
-                        checkpoint.save(null /* todo */);
+                      if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
+                        try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+                          checkpoint.save(out);
+                        }
+                        lastSaveRef.set(now);
                       }
                     }
                   }
@@ -269,7 +277,10 @@ public class Main {
             long nbkup = numSuccessful.get();
             System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
             if (backup) {
-              checkpoint.save(null /* todo */);
+              Instant now = Instant.now();
+              try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+                checkpoint.save(out);
+              }
             }
           }
         } else {
@@ -528,9 +539,8 @@ public class Main {
           SqliteCheckpoint.FORMAT,
   };
 
-  private static Checkpoint findMostRecentCheckpoint(String password, boolean local) throws IOException {
+  private static Checkpoint findMostRecentCheckpoint(CheckpointSequence entries) throws IOException {
     System.out.println("Fetching checkpoint...");
-    CheckpointSequence entries = checkpoints(password, local);
     OptionalLong mostRecentID = entries.mostRecentCheckpointID();
     if (!mostRecentID.isPresent()) {
       return FORMATS[0].createEmpty();

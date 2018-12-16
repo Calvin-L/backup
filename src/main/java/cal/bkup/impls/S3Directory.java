@@ -80,12 +80,6 @@ public class S3Directory implements SimpleDirectory {
   }
 
   @Override
-  public OutputStream create(String name) throws IOException {
-    // TODO: this operation is *impossible* to do atomically in S3
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
   public OutputStream createOrReplace(String name) throws IOException {
     // TODO: this operation is NOT consistent with open()
     // New object creation works as expected, but object overwrites in S3

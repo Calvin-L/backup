@@ -123,11 +123,6 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public Instant lastSave() {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
   public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
     try {
       insertFileRecord.setString(1, r.system().toString());

@@ -28,12 +28,6 @@ public class LocalDirectory implements SimpleDirectory {
   }
 
   @Override
-  public OutputStream create(String name) throws IOException {
-    // TODO: this may not be possible to do atomically on a filesystem
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
   public OutputStream createOrReplace(String name) throws IOException {
     // TODO: this isn't atomic or durable
     return new FileOutputStream(dir.resolve(name).toString());

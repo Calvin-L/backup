@@ -24,11 +24,6 @@ public class XZCompressedDirectory implements SimpleDirectory {
   }
 
   @Override
-  public OutputStream create(String name) throws IOException {
-    return new XZOutputStream(wrapped.create(name), new LZMA2Options());
-  }
-
-  @Override
   public OutputStream createOrReplace(String name) throws IOException {
     return new XZOutputStream(wrapped.createOrReplace(name), new LZMA2Options());
   }
