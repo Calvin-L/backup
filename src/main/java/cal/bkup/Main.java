@@ -11,6 +11,7 @@ import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.SqliteCheckpoint2;
+import cal.bkup.impls.StatisticsCollectingInputStream;
 import cal.bkup.impls.XZCompressedDirectory;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
@@ -25,6 +26,7 @@ import cal.bkup.types.Op;
 import cal.bkup.types.Price;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Rule;
+import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -400,7 +402,7 @@ public class Main {
           Instant checkpointModTime = checkpoint.modTime(resource, target);
           if (checkpointModTime == null || resource.modTime().compareTo(checkpointModTime) > 0) {
             long estimatedSize = resource.sizeEstimateInBytes();
-            Op<BackupReport> op = new Op<BackupReport>() {
+            ops.add(new Op<Void>() {
               @Override
               public Price cost() {
                 return target.estimatedCostOfDataTransfer(estimatedSize);
@@ -417,41 +419,30 @@ public class Main {
               }
 
               @Override
-              public BackupReport exec() throws IOException {
-                return target.backup(resource.open(), estimatedSize);
-              }
-
-              @Override
-              public String toString() {
-                return resource.path().toString();
-              }
-            };
-            ops.add(new Op<Void>() {
-
-              @Override
-              public Price cost() {
-                return op.cost();
-              }
-
-              @Override
-              public Price monthlyMaintenanceCost() {
-                return op.monthlyMaintenanceCost();
-              }
-
-              @Override
-              public long estimatedDataTransfer() {
-                return op.estimatedDataTransfer();
-              }
-
-              @Override
               public Void exec() throws IOException {
-                checkpoint.noteSuccessfulBackup(resource, op.exec());
+                StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open());
+                BackupReport report;
+                try (InputStream toClose = stream) {
+                  report = target.backup(toClose, estimatedSize);
+                }
+                assert stream.isClosed();
+                checkpoint.noteSuccessfulBackup(target, resource, new Sha256AndSize() {
+                  @Override
+                  public byte[] sha256() {
+                    return stream.getSha256Digest();
+                  }
+
+                  @Override
+                  public long size() {
+                    return stream.getBytesRead();
+                  }
+                }, report);
                 return null;
               }
 
               @Override
               public String toString() {
-                return op.toString();
+                return resource.path().toString();
               }
             });
           } else {

@@ -10,9 +10,7 @@ import cal.bkup.types.Id;
 import cal.bkup.types.Op;
 import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
-import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
-import cal.bkup.types.Sha256AndSize;
 import com.amazonaws.services.glacier.AmazonGlacier;
 import com.amazonaws.services.glacier.AmazonGlacierClient;
 import com.amazonaws.services.glacier.TreeHashGenerator;
@@ -53,7 +51,6 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -133,13 +130,9 @@ public class GlacierBackupTarget implements BackupTarget {
 
   @Override
   public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
-    final BackupTarget target = this;
-
     if (estimatedByteCount <= ONESHOT_UPLOAD_CUTOFF) {
-
       ByteArrayOutputStream buf = new ByteArrayOutputStream();
-      final Sha256AndSize capturedInfo;
-      capturedInfo = Util.copyStreamAndCaptureSha256(data, buf);
+      Util.copyStream(data, buf);
       byte[] bytes = buf.toByteArray();
 
       String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(bytes));
@@ -153,34 +146,18 @@ public class GlacierBackupTarget implements BackupTarget {
       return new BackupReport() {
         @Override
         public long sizeAtTarget() {
-          return capturedInfo.size();
-        }
-
-        @Override
-        public BackupTarget target() {
-          return target;
-        }
-
-        @Override
-        public byte[] sha256() {
-          return capturedInfo.sha256();
+          return bytes.length;
         }
 
         @Override
         public Id idAtTarget() {
           return id;
         }
-
-        @Override
-        public long size() {
-          return capturedInfo.size();
-        }
       };
     }
 
     byte[] chunk = new byte[UPLOAD_CHUNK_SIZE];
     List<byte[]> binaryChecksums = new ArrayList<>();
-    MessageDigest md = Util.sha256Digest();
 
     InitiateMultipartUploadResult init = client.initiateMultipartUpload(
         new InitiateMultipartUploadRequest()
@@ -191,7 +168,6 @@ public class GlacierBackupTarget implements BackupTarget {
     long total = 0;
     int n;
     while ((n = readChunk(data, chunk)) > 0) {
-      md.update(chunk, 0, n);
       String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
       binaryChecksums.add(BinaryUtils.fromHex(checksum));
       UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
@@ -215,7 +191,6 @@ public class GlacierBackupTarget implements BackupTarget {
 
     CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
     Id backupId = new Id(compResult.getArchiveId());
-    byte[] sha256 = md.digest();
     final long finalSize = total;
     return new BackupReport() {
       @Override
@@ -224,23 +199,8 @@ public class GlacierBackupTarget implements BackupTarget {
       }
 
       @Override
-      public BackupTarget target() {
-        return target;
-      }
-
-      @Override
-      public byte[] sha256() {
-        return sha256;
-      }
-
-      @Override
       public Id idAtTarget() {
         return backupId;
-      }
-
-      @Override
-      public long size() {
-        return finalSize;
       }
     };
   }

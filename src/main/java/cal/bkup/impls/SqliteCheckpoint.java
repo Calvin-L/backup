@@ -10,6 +10,7 @@ import cal.bkup.types.Id;
 import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 
@@ -127,12 +128,12 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized void noteSuccessfulBackup(Resource r, BackupReport report) throws IOException {
+  public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
     try {
       insertFileRecord.setString(1, r.system().toString());
       insertFileRecord.setString(2, r.path().toString());
       insertFileRecord.setLong(3, r.modTime().toEpochMilli());
-      insertFileRecord.setString(4, report.target().name().toString());
+      insertFileRecord.setString(4, target.name().toString());
       insertFileRecord.setString(5, report.idAtTarget().toString());
       insertFileRecord.executeUpdate();
     } catch (SQLException e) {

@@ -10,6 +10,7 @@ import cal.bkup.types.Id;
 import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 
@@ -68,7 +69,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
       Checkpoint ck2 = createEmpty();
       oldCheckpoint.list().forEach(info -> {
         try {
-          ck2.noteSuccessfulBackup(new Resource() {
+          ck2.noteSuccessfulBackup(null, new Resource() {
             @Override
             public Id system() {
               return info.system();
@@ -93,25 +94,10 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
             public long sizeEstimateInBytes() {
               throw new UnsupportedOperationException();
             }
-          }, new BackupReport() {
-            @Override
-            public BackupTarget target() {
-              throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public byte[] sha256() {
-              return null;
-            }
-
+          }, null, new BackupReport() {
             @Override
             public Id idAtTarget() {
               return info.idAtTarget();
-            }
-
-            @Override
-            public long size() {
-              return info.sizeAtTarget();
             }
 
             @Override
@@ -185,15 +171,15 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized void noteSuccessfulBackup(Resource r, BackupReport report) throws IOException {
-    String sha256 = Util.sha256toString(report.sha256());
+  public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
+    String sha256 = Util.sha256toString(contentSummary.sha256());
 //    BackedUpResourceInfo info = report.infoAtTarget();
 //    Resource r = report.resourceBackedUp();
     try {
       insertBlobRecord.setString(1, sha256);
-      insertBlobRecord.setLong(2, report.size());
+      insertBlobRecord.setLong(2, contentSummary.size());
       insertBlobRecord.setLong(3, report.sizeAtTarget());
-      insertBlobRecord.setString(4, report.target().name().toString());
+      insertBlobRecord.setString(4, target.name().toString());
       insertBlobRecord.setString(5, report.idAtTarget().toString());
       insertBlobRecord.executeUpdate();
 

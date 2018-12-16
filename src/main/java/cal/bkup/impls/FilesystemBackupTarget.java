@@ -62,23 +62,8 @@ public class FilesystemBackupTarget implements BackupTarget {
     final Id id = new Id(dst.toString());
     return new BackupReport() {
       @Override
-      public BackupTarget target() {
-        return target;
-      }
-
-      @Override
-      public byte[] sha256() {
-        return copyResult.sha256();
-      }
-
-      @Override
       public Id idAtTarget() {
         return id;
-      }
-
-      @Override
-      public long size() {
-        return copyResult.size();
       }
 
       @Override

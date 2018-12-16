@@ -17,7 +17,7 @@ public interface Checkpoint extends AutoCloseable {
 
   Instant lastSave();
 
-  void noteSuccessfulBackup(Resource r, BackupReport report) throws IOException;
+  void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException;
   void noteSymLink(Id system, SymLink link) throws IOException;
   void noteHardLink(Id systemId, HardLink hardlink) throws IOException;
 

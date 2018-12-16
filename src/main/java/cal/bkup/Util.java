@@ -27,12 +27,7 @@ public abstract class Util {
   public static final long ONE_GB = ONE_MB * 1024;
   public static final long ONE_TB = ONE_GB * 1024;
 
-  private static final ThreadLocal<byte[]> MEM_BUFFER = new ThreadLocal<byte[]>() {
-    @Override
-    protected byte[] initialValue() {
-      return new byte[4096];
-    }
-  };
+  private static final ThreadLocal<byte[]> MEM_BUFFER = ThreadLocal.withInitial(() -> new byte[4096]);
 
   public static long copyStream(InputStream in, OutputStream out) throws IOException {
     byte[] buf = MEM_BUFFER.get();
