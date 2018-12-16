@@ -42,77 +42,60 @@ public class FilesystemBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<BackupReport> backup(Resource r) throws IOException {
-    long size = r.sizeEstimateInBytes();
+  public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
     final BackupTarget target = this;
-    return new Op<BackupReport>() {
+    String uuid = UUID.randomUUID().toString();
+    String prefix = uuid.substring(0, 2);
+    Path dst = root.resolve(prefix).resolve(uuid);
+    if (Files.exists(dst)) {
+      throw new IOException("refusing to overwrite " + dst);
+    }
+    Files.createDirectories(dst.getParent());
+    FileOutputStream openFile = new FileOutputStream(dst.toString());
+    final Sha256AndSize copyResult;
+    try (BufferedOutputStream out = new BufferedOutputStream(openFile)) {
+      copyResult = Util.copyStreamAndCaptureSha256(data, out);
+      out.flush();
+      openFile.getFD().sync();
+      // TODO: sync parent folder too!
+    }
+    final Id id = new Id(dst.toString());
+    return new BackupReport() {
       @Override
-      public Price cost() {
-        return Price.ZERO;
+      public BackupTarget target() {
+        return target;
       }
 
       @Override
-      public Price monthlyMaintenanceCost() {
-        return Price.ZERO;
+      public byte[] sha256() {
+        return copyResult.sha256();
       }
 
       @Override
-      public long estimatedDataTransfer() {
-        return size;
+      public Id idAtTarget() {
+        return id;
       }
 
       @Override
-      public BackupReport exec() throws IOException {
-        String uuid = UUID.randomUUID().toString();
-        String prefix = uuid.substring(0, 2);
-        Path dst = root.resolve(prefix).resolve(uuid);
-        if (Files.exists(dst)) {
-          throw new IOException("refusing to overwrite " + dst);
-        }
-        Files.createDirectories(dst.getParent());
-        FileOutputStream openFile = new FileOutputStream(dst.toString());
-        final Sha256AndSize copyResult;
-        try (BufferedOutputStream out = new BufferedOutputStream(openFile);
-             InputStream in = r.open()) {
-          copyResult = Util.copyStreamAndCaptureSha256(in, out);
-          out.flush();
-          openFile.getFD().sync();
-          // TODO: sync parent folder too!
-        }
-        final Id id = new Id(dst.toString());
-        return new BackupReport() {
-          @Override
-          public BackupTarget target() {
-            return target;
-          }
-
-          @Override
-          public byte[] sha256() {
-            return copyResult.sha256();
-          }
-
-          @Override
-          public Id idAtTarget() {
-            return id;
-          }
-
-          @Override
-          public long size() {
-            throw new UnsupportedOperationException();
-          }
-
-          @Override
-          public long sizeAtTarget() {
-            return copyResult.size();
-          }
-        };
+      public long size() {
+        return copyResult.size();
       }
 
       @Override
-      public String toString() {
-        return r.path().toString();
+      public long sizeAtTarget() {
+        return copyResult.size();
       }
     };
+  }
+
+  @Override
+  public Price estimatedCostOfDataTransfer(long resourceSizeInBytes) {
+    return Price.ZERO;
+  }
+
+  @Override
+  public Price estimatedMonthlyMaintenanceCost(long resourceSizeInBytes) {
+    return Price.ZERO;
   }
 
   @Override

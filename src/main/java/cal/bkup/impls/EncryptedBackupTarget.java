@@ -7,6 +7,7 @@ import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
 import cal.bkup.types.Pair;
+import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 
@@ -33,38 +34,32 @@ public class EncryptedBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<BackupReport> backup(Resource r) throws IOException {
-    return backupTarget.backup(new Resource() {
-      @Override
-      public Id system() {
-        return r.system();
-      }
+  public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
+    try {
+      return backupTarget.backup(new EncryptedInputStream(data, password), estimatedByteCount);
+    } catch (GeneralSecurityException e) {
+      throw new IOException(e);
+    }
+  }
 
-      @Override
-      public Path path() {
-        return r.path();
-      }
+  /**
+   * Estimate how many bytes it will take to store an encrypted version of some data.
+   * @param originalSize - the number of bytes in the data
+   * @return roughly how many bytes the encrypted version of the data will occupy
+   */
+  private long encryptedSizeEstimate(long originalSize) {
+    // TODO: is this right? can we do better?
+    return originalSize;
+  }
 
-      @Override
-      public Instant modTime() throws IOException {
-        return r.modTime();
-      }
+  @Override
+  public Price estimatedCostOfDataTransfer(long resourceSizeInBytes) {
+    return backupTarget.estimatedCostOfDataTransfer(encryptedSizeEstimate(resourceSizeInBytes));
+  }
 
-      @Override
-      public InputStream open() throws IOException {
-        try {
-          return new EncryptedInputStream(r.open(), password);
-        } catch (GeneralSecurityException e) {
-          throw new IOException(e);
-        }
-      }
-
-      @Override
-      public long sizeEstimateInBytes() throws IOException {
-        // TODO: can we do better?
-        return r.sizeEstimateInBytes();
-      }
-    });
+  @Override
+  public Price estimatedMonthlyMaintenanceCost(long resourceSizeInBytes) {
+    return backupTarget.estimatedMonthlyMaintenanceCost(encryptedSizeEstimate(resourceSizeInBytes));
   }
 
   @Override

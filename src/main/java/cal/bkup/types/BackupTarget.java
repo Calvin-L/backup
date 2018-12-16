@@ -7,7 +7,9 @@ import java.util.stream.Stream;
 
 public interface BackupTarget extends AutoCloseable {
   Id name();
-  Op<BackupReport> backup(Resource r) throws IOException;
+  BackupReport backup(InputStream data, long estimatedByteCount) throws IOException;
+  Price estimatedCostOfDataTransfer(long resourceSizeInBytes);
+  Price estimatedMonthlyMaintenanceCost(long resourceSizeInBytes);
   Stream<BackedUpResourceInfo> list() throws IOException;
   Op<Void> delete(BackedUpResourceInfo obj) throws IOException;
 

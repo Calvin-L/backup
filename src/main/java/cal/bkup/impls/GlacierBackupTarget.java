@@ -74,6 +74,13 @@ public class GlacierBackupTarget implements BackupTarget {
     client.createVault(req);
   }
 
+  private static final int UPLOAD_CHUNK_SIZE = 128 * 1024 * 1024; // 128 Mb
+
+  /**
+   * Files whose sizes are smaller than this will be uploaded in one request
+   */
+  private static final int ONESHOT_UPLOAD_CUTOFF = UPLOAD_CHUNK_SIZE;
+
   // See https://aws.amazon.com/glacier/pricing/
   // See https://aws.amazon.com/glacier/faqs/
   private static final BigFraction PENNIES_PER_UPLOAD_REQ = new BigFraction(0.05).multiply(new BigFraction(100)).divide(new BigFraction(1000));
@@ -113,171 +120,127 @@ public class GlacierBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<BackupReport> backup(Resource r) throws IOException {
-    int chunkSize = 4 * 1024 * 1024; // 4mb
-    long nbytes = r.sizeEstimateInBytes();
+  public Price estimatedCostOfDataTransfer(long resourceSizeInBytes) {
+    return resourceSizeInBytes <= ONESHOT_UPLOAD_CUTOFF ?
+            () -> PENNIES_PER_UPLOAD_REQ :
+            () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(resourceSizeInBytes / UPLOAD_CHUNK_SIZE).add(BigFraction.ONE));
+  }
+
+  @Override
+  public Price estimatedMonthlyMaintenanceCost(long resourceSizeInBytes) {
+    return maintenanceCostForArchive(resourceSizeInBytes);
+  }
+
+  @Override
+  public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
     final BackupTarget target = this;
 
-    if (nbytes <= chunkSize * 2) {
-      return new Op<BackupReport>() {
-        @Override
-        public Price cost() {
-          return () -> PENNIES_PER_UPLOAD_REQ;
-        }
+    if (estimatedByteCount <= ONESHOT_UPLOAD_CUTOFF) {
 
-        @Override
-        public Price monthlyMaintenanceCost() {
-          return maintenanceCostForArchive(nbytes);
-        }
+      ByteArrayOutputStream buf = new ByteArrayOutputStream();
+      final Sha256AndSize capturedInfo;
+      capturedInfo = Util.copyStreamAndCaptureSha256(data, buf);
+      byte[] bytes = buf.toByteArray();
 
-        @Override
-        public long estimatedDataTransfer() {
-          return nbytes;
-        }
-
-        @Override
-        public BackupReport exec() throws IOException {
-          ByteArrayOutputStream buf = new ByteArrayOutputStream();
-          final Sha256AndSize capturedInfo;
-          try (InputStream in = r.open()) {
-            capturedInfo = Util.copyStreamAndCaptureSha256(in, buf);
-          }
-          byte[] bytes = buf.toByteArray();
-
-          String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(bytes));
-          UploadArchiveRequest req = new UploadArchiveRequest()
+      String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(bytes));
+      UploadArchiveRequest req = new UploadArchiveRequest()
               .withVaultName(vaultName)
               .withChecksum(checksum)
               .withContentLength((long)bytes.length)
               .withBody(new ByteArrayInputStream(bytes));
-          UploadArchiveResult res = client.uploadArchive(req);
-          Id id = new Id(res.getArchiveId());
-          return new BackupReport() {
-            @Override
-            public long sizeAtTarget() {
-              return capturedInfo.size();
-            }
-
-            @Override
-            public BackupTarget target() {
-              return target;
-            }
-
-            @Override
-            public byte[] sha256() {
-              return capturedInfo.sha256();
-            }
-
-            @Override
-            public Id idAtTarget() {
-              return id;
-            }
-
-            @Override
-            public long size() {
-              // TODO: not allowed to know this (leakage)
-              throw new UnsupportedOperationException();
-            }
-          };
+      UploadArchiveResult res = client.uploadArchive(req);
+      Id id = new Id(res.getArchiveId());
+      return new BackupReport() {
+        @Override
+        public long sizeAtTarget() {
+          return capturedInfo.size();
         }
 
         @Override
-        public String toString() {
-          return r.path().toString();
+        public BackupTarget target() {
+          return target;
+        }
+
+        @Override
+        public byte[] sha256() {
+          return capturedInfo.sha256();
+        }
+
+        @Override
+        public Id idAtTarget() {
+          return id;
+        }
+
+        @Override
+        public long size() {
+          return capturedInfo.size();
         }
       };
     }
 
-    return new Op<BackupReport>() {
-      @Override
-      public Price cost() {
-        return () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(nbytes / chunkSize).add(BigFraction.TWO));
-      }
+    byte[] chunk = new byte[UPLOAD_CHUNK_SIZE];
+    List<byte[]> binaryChecksums = new ArrayList<>();
+    MessageDigest md = Util.sha256Digest();
 
-      @Override
-      public Price monthlyMaintenanceCost() {
-        return maintenanceCostForArchive(nbytes);
-      }
-
-      @Override
-      public long estimatedDataTransfer() {
-        return nbytes;
-      }
-
-      @Override
-      public BackupReport exec() throws IOException {
-        byte[] chunk = new byte[chunkSize];
-        List<byte[]> binaryChecksums = new ArrayList<>();
-        MessageDigest md = Util.sha256Digest();
-
-        InitiateMultipartUploadResult init = client.initiateMultipartUpload(
-            new InitiateMultipartUploadRequest()
-                .withVaultName(vaultName)
-                .withPartSize(Integer.toString(chunkSize)));
-        String id = init.getUploadId();
-
-        long total = 0;
-        try (InputStream in = r.open()) {
-          int n;
-          while ((n = readChunk(in, chunk)) > 0) {
-            md.update(chunk, 0, n);
-            String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
-            binaryChecksums.add(BinaryUtils.fromHex(checksum));
-            UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
-                .withVaultName(vaultName)
-                .withUploadId(id)
-                .withBody(new ByteArrayInputStream(chunk, 0, n))
-                .withChecksum(checksum)
-                .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
-
-            UploadMultipartPartResult partResult = client.uploadMultipartPart(partRequest);
-            System.out.println("Part uploaded [" + r.path().getFileName() + "], checksum: " + partResult.getChecksum());
-            total += n;
-          }
-        }
-
-        String checksum = TreeHashGenerator.calculateTreeHash(binaryChecksums);
-        CompleteMultipartUploadRequest compRequest = new CompleteMultipartUploadRequest()
+    InitiateMultipartUploadResult init = client.initiateMultipartUpload(
+        new InitiateMultipartUploadRequest()
             .withVaultName(vaultName)
-            .withUploadId(id)
-            .withChecksum(checksum)
-            .withArchiveSize(Long.toString(total));
+            .withPartSize(Integer.toString(UPLOAD_CHUNK_SIZE)));
+    String id = init.getUploadId();
 
-        CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
-        Id backupId = new Id(compResult.getArchiveId());
-        byte[] sha256 = md.digest();
-        final long finalSize = total;
-        return new BackupReport() {
-          @Override
-          public long sizeAtTarget() {
-            return finalSize;
-          }
+    long total = 0;
+    int n;
+    while ((n = readChunk(data, chunk)) > 0) {
+      md.update(chunk, 0, n);
+      String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
+      binaryChecksums.add(BinaryUtils.fromHex(checksum));
+      UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
+          .withVaultName(vaultName)
+          .withUploadId(id)
+          .withBody(new ByteArrayInputStream(chunk, 0, n))
+          .withChecksum(checksum)
+          .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
 
-          @Override
-          public BackupTarget target() {
-            return target;
-          }
+      UploadMultipartPartResult partResult = client.uploadMultipartPart(partRequest);
+      System.out.println("Part uploaded [file=???], checksum: " + partResult.getChecksum());
+      total += n;
+    }
 
-          @Override
-          public byte[] sha256() {
-            return sha256;
-          }
+    String checksum = TreeHashGenerator.calculateTreeHash(binaryChecksums);
+    CompleteMultipartUploadRequest compRequest = new CompleteMultipartUploadRequest()
+        .withVaultName(vaultName)
+        .withUploadId(id)
+        .withChecksum(checksum)
+        .withArchiveSize(Long.toString(total));
 
-          @Override
-          public Id idAtTarget() {
-            return backupId;
-          }
-
-          @Override
-          public long size() {
-            throw new UnsupportedOperationException();
-          }
-        };
+    CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
+    Id backupId = new Id(compResult.getArchiveId());
+    byte[] sha256 = md.digest();
+    final long finalSize = total;
+    return new BackupReport() {
+      @Override
+      public long sizeAtTarget() {
+        return finalSize;
       }
 
       @Override
-      public String toString() {
-        return r.path().toString();
+      public BackupTarget target() {
+        return target;
+      }
+
+      @Override
+      public byte[] sha256() {
+        return sha256;
+      }
+
+      @Override
+      public Id idAtTarget() {
+        return backupId;
+      }
+
+      @Override
+      public long size() {
+        return finalSize;
       }
     };
   }

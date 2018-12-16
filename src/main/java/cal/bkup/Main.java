@@ -399,7 +399,33 @@ public class Main {
           presentFiles.add(resource.path());
           Instant checkpointModTime = checkpoint.modTime(resource, target);
           if (checkpointModTime == null || resource.modTime().compareTo(checkpointModTime) > 0) {
-            Op<BackupReport> op = target.backup(resource);
+            long estimatedSize = resource.sizeEstimateInBytes();
+            Op<BackupReport> op = new Op<BackupReport>() {
+              @Override
+              public Price cost() {
+                return target.estimatedCostOfDataTransfer(estimatedSize);
+              }
+
+              @Override
+              public Price monthlyMaintenanceCost() {
+                return target.estimatedMonthlyMaintenanceCost(estimatedSize);
+              }
+
+              @Override
+              public long estimatedDataTransfer() {
+                return estimatedSize;
+              }
+
+              @Override
+              public BackupReport exec() throws IOException {
+                return target.backup(resource.open(), estimatedSize);
+              }
+
+              @Override
+              public String toString() {
+                return resource.path().toString();
+              }
+            };
             ops.add(new Op<Void>() {
 
               @Override
