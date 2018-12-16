@@ -81,11 +81,17 @@ public class S3Directory implements SimpleDirectory {
 
   @Override
   public OutputStream create(String name) throws IOException {
+    // TODO: this operation is *impossible* to do atomically in S3
     throw new UnsupportedOperationException();
   }
 
   @Override
   public OutputStream createOrReplace(String name) throws IOException {
+    // TODO: this operation is NOT consistent with open()
+    // New object creation works as expected, but object overwrites in S3
+    // are eventually consistent.  That means calling open() on the same
+    // name after invoking this method may give back stale data.  :(
+
     // I'd like to stream directly to S3, but unfortunately the API requires that it
     // know the exact size of the data being uploaded, which might not be possible
     // for compressed streams and the like.
