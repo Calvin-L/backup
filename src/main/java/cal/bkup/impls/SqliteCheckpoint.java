@@ -55,7 +55,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     }
 
     @Override
-    public Checkpoint tryRead(InputStream in) throws IOException, IncorrectFormatException {
+    public Checkpoint tryRead(InputStream in) throws IOException {
       SqliteCheckpoint result;
       try {
         result = new SqliteCheckpoint(in);
@@ -67,6 +67,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
     @Override
     public Checkpoint migrateFrom(Checkpoint result) {
+      // this is the root format
       throw new UnsupportedOperationException();
     }
   };
@@ -90,18 +91,13 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     reopen();
   }
 
-  private SqliteCheckpoint(InputStream in) throws SQLException, IOException, IncorrectFormatException {
+  private SqliteCheckpoint(InputStream in) throws SQLException, IOException {
     file = Files.createTempFile("backup", "db");
     System.out.println("Using SQLite file " + file);
     try (OutputStream out = new BufferedOutputStream(new FileOutputStream(file.toString()))) {
       Util.copyStream(in, out);
     }
     reopen();
-    checkFormat();
-  }
-
-  private void checkFormat() throws IncorrectFormatException {
-    throw new UnsupportedOperationException();
   }
 
   @Override

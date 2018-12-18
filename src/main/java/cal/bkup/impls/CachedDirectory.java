@@ -51,6 +51,7 @@ public class CachedDirectory implements SimpleDirectory {
   public InputStream open(String name) throws IOException {
     Path loc = find(name);
     if (!Files.exists(loc)) {
+      System.out.println("Caching " + name + " as " + loc);
       try (InputStream in = wrapped.open(name);
            OutputStream out = new FileOutputStream(loc.toString())) {
         Util.copyStream(in, out);

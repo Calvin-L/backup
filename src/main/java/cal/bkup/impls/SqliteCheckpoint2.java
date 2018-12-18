@@ -59,7 +59,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
       try {
         result = new SqliteCheckpoint2(in);
       } catch (SQLException e) {
-        throw new IOException(e);
+        throw new IncorrectFormatException(e);
       }
       return result;
     }
