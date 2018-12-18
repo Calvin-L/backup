@@ -48,11 +48,6 @@ public class TestDirectories {
     }
 
     @Override
-    public OutputStream create(String name) throws IOException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public OutputStream createOrReplace(String name) throws IOException {
       return new ByteArrayOutputStream() {
         @Override

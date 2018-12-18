@@ -19,6 +19,7 @@ repositories {
 }
 
 dependencies {
+    compile project(":crash-safe-io")
     compile "com.amazonaws:aws-java-sdk-glacier:1.11.73"
     compile "com.amazonaws:aws-java-sdk-s3:1.11.73"
     compile "org.xerial:sqlite-jdbc:3.8.11.2"

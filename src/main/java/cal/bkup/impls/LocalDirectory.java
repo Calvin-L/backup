@@ -1,7 +1,9 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.SimpleDirectory;
+import org.crashsafeio.AtomicDurableOutputStream;
 
+import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -29,8 +31,7 @@ public class LocalDirectory implements SimpleDirectory {
 
   @Override
   public OutputStream createOrReplace(String name) throws IOException {
-    // TODO: this isn't atomic or durable
-    return new FileOutputStream(dir.resolve(name).toString());
+    return new BufferedOutputStream(new AtomicDurableOutputStream(dir.resolve(name)));
   }
 
   @Override

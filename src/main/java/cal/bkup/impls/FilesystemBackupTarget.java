@@ -12,12 +12,14 @@ import cal.bkup.types.Price;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Sha256AndSize;
+import org.crashsafeio.AtomicDurableOutputStream;
 
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -43,7 +45,6 @@ public class FilesystemBackupTarget implements BackupTarget {
 
   @Override
   public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
-    final BackupTarget target = this;
     String uuid = UUID.randomUUID().toString();
     String prefix = uuid.substring(0, 2);
     Path dst = root.resolve(prefix).resolve(uuid);
@@ -51,13 +52,9 @@ public class FilesystemBackupTarget implements BackupTarget {
       throw new IOException("refusing to overwrite " + dst);
     }
     Files.createDirectories(dst.getParent());
-    FileOutputStream openFile = new FileOutputStream(dst.toString());
     final Sha256AndSize copyResult;
-    try (BufferedOutputStream out = new BufferedOutputStream(openFile)) {
+    try (OutputStream out = new AtomicDurableOutputStream(dst)) {
       copyResult = Util.copyStreamAndCaptureSha256(data, out);
-      out.flush();
-      openFile.getFD().sync();
-      // TODO: sync parent folder too!
     }
     final Id id = new Id(dst.toString());
     return new BackupReport() {
@@ -146,7 +143,7 @@ public class FilesystemBackupTarget implements BackupTarget {
   }
 
   @Override
-  public void close() throws Exception {
+  public void close() {
   }
 
   @Override
