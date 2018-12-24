@@ -63,31 +63,6 @@ public abstract class Util {
     return count;
   }
 
-  public static Sha256AndSize copyStreamAndCaptureSha256(InputStream in, OutputStream out) throws IOException {
-    byte[] buf = MEM_BUFFER.get();
-    long count = 0;
-    int n;
-    MessageDigest md = sha256Digest();
-    while ((n = in.read(buf)) >= 0) {
-      md.update(buf, 0, n);
-      out.write(buf, 0, n);
-      count += n;
-    }
-    final long finalCount = count;
-    final byte[] sha256 = md.digest();
-    return new Sha256AndSize() {
-      @Override
-      public byte[] sha256() {
-        return sha256;
-      }
-
-      @Override
-      public long size() {
-        return finalCount;
-      }
-    };
-  }
-
   public static byte[] read(InputStream in) throws IOException {
     try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       copyStream(in, out);

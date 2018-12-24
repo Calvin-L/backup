@@ -415,7 +415,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
-    insertBlobRecord = conn.prepareStatement("INSERT OR REPLACE INTO blobs (sha256, num_bytes, num_bytes_at_target, target, id) VALUES (?, ?, ?, ?, ?)");
+    insertBlobRecord = conn.prepareStatement("INSERT INTO blobs (sha256, num_bytes, num_bytes_at_target, target, id) VALUES (?, ?, ?, ?, ?)");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, sha256) VALUES (?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
     insertHardLink = conn.prepareStatement("INSERT OR REPLACE INTO hardlinks (system, src, dst) VALUES (?, ?, ?)");
