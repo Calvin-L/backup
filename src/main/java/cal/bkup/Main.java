@@ -565,8 +565,8 @@ public class Main {
       Checkpoint result;
       try (InputStream in = entries.read(id)) {
         result = format.tryRead(in);
-      } catch (IncorrectFormatException ignored) {
-        // try the next one
+      } catch (IncorrectFormatException e) {
+        System.out.println("Does not match format " + format.name() + ": " + e.getMessage());
         continue;
       }
       System.out.println("Loaded checkpoint " + id + " (format=" + format.name() + ')');

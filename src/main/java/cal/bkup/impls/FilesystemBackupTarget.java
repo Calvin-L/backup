@@ -18,6 +18,7 @@ import org.crashsafeio.DurableIOUtil;
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -87,52 +88,62 @@ public class FilesystemBackupTarget implements BackupTarget {
     return Files.list(root)
         .map(Path::getFileName)
         .map(Object::toString)
-        .filter(f -> {
+        .flatMap(dir -> {
           try {
-            UUID.fromString(f);
-            return true;
-          } catch (IllegalArgumentException ignored) {
-            return false;
-          }
-        })
-        .map(f -> new BackedUpResourceInfo() {
-          @Override
-          public BackupTarget target() {
-            return target;
-          }
+            return Files.list(root.resolve(dir))
+                    .map(Path::getFileName)
+                    .map(Object::toString)
+                    .filter(f -> {
+                      try {
+                        UUID.fromString(f);
+                        return true;
+                      } catch (IllegalArgumentException ignored) {
+                        return false;
+                      }
+                    })
+                    .map(f -> new BackedUpResourceInfo() {
+                      @Override
+                      public BackupTarget target() {
+                        return target;
+                      }
 
-          @Override
-          public Id idAtTarget() {
-            return new Id(f);
-          }
+                      @Override
+                      public Id idAtTarget() {
+                        return new Id(f);
+                      }
 
-          @Override
-          public long storedSizeInBytes() {
-            try {
-              return Files.size(root.resolve(f));
-            } catch (IOException e) {
-              return 0L;
-            }
-          }
+                      @Override
+                      public long storedSizeInBytes() {
+                        try {
+                          return Files.size(root.resolve(f));
+                        } catch (IOException e) {
+                          return 0L;
+                        }
+                      }
 
-          @Override
-          public Instant backupTime() {
-            try {
-              return Files.getLastModifiedTime(root.resolve(f)).toInstant();
-            } catch (IOException e) {
-              throw new RuntimeException(e);
-            }
+                      @Override
+                      public Instant backupTime() {
+                        try {
+                          return Files.getLastModifiedTime(root.resolve(f)).toInstant();
+                        } catch (IOException e) {
+                          throw new RuntimeException(e);
+                        }
+                      }
+                    });
+          } catch (IOException e) {
+            throw new IOError(e);
           }
         });
   }
 
   @Override
   public Op<Void> delete(BackedUpResourceInfo id) throws IOException {
-    Path path = root.resolve(id.toString());
+    String uuid = id.idAtTarget().toString();
+    Path path = root.resolve(uuid.substring(0, 2)).resolve(uuid);
     return new FreeOp<Void>() {
       @Override
       public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-        Files.deleteIfExists(path);
+        Files.delete(path);
         return null;
       }
 

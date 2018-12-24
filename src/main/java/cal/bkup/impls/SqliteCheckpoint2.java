@@ -119,6 +119,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   private PreparedStatement insertBlobRecord;
   private PreparedStatement insertFileRecord;
   private PreparedStatement queryAll;
+  private PreparedStatement queryBlobByHash;
   private PreparedStatement insertSymLink;
   private PreparedStatement querySymLinksBySystem;
   private PreparedStatement queryHardLinksBySystem;
@@ -173,12 +174,20 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
     String sha256 = Util.sha256toString(contentSummary.sha256());
     try {
-      insertBlobRecord.setString(1, sha256);
-      insertBlobRecord.setLong(2, contentSummary.size());
-      insertBlobRecord.setLong(3, report.sizeAtTarget());
-      insertBlobRecord.setString(4, target.name().toString());
-      insertBlobRecord.setString(5, report.idAtTarget().toString());
-      insertBlobRecord.executeUpdate();
+      queryBlobByHash.setString(1, target.name().toString());
+      queryBlobByHash.setString(2, sha256);
+      queryBlobByHash.setLong(3, contentSummary.size());
+
+      try (ResultSet rs = queryBlobByHash.executeQuery()) {
+        if (!rs.next()) {
+          insertBlobRecord.setString(1, sha256);
+          insertBlobRecord.setLong(2, contentSummary.size());
+          insertBlobRecord.setLong(3, report.sizeAtTarget());
+          insertBlobRecord.setString(4, target.name().toString());
+          insertBlobRecord.setString(5, report.idAtTarget().toString());
+          insertBlobRecord.executeUpdate();
+        }
+      }
 
       insertFileRecord.setString(1, r.system().toString());
       insertFileRecord.setString(2, r.path().toString());
@@ -386,6 +395,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     if (insertHardLink != null) { insertHardLink.close(); insertHardLink = null; }
     if (queryModTime != null) { queryModTime.close(); queryModTime = null; }
     if (queryAll != null) { queryAll.close(); queryAll = null; }
+    if (queryBlobByHash != null) { queryBlobByHash.close(); queryBlobByHash = null; }
     if (queryHardLinksBySystem != null) { queryHardLinksBySystem.close(); queryHardLinksBySystem = null; }
     if (querySymLinksBySystem != null) { querySymLinksBySystem.close(); querySymLinksBySystem = null; }
     if (deleteFileRecord != null) { deleteFileRecord.close(); deleteFileRecord = null; }
@@ -400,7 +410,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     conn.setAutoCommit(false);
 
     try (Statement init = conn.createStatement()) {
-      init.execute("CREATE TABLE IF NOT EXISTS blobs (sha256 TEXT PRIMARY KEY, num_bytes INT, num_bytes_at_target INT, target TEXT, id TEXT) WITHOUT ROWID");
+      init.execute("CREATE TABLE IF NOT EXISTS blobs (sha256 TEXT, num_bytes INT, num_bytes_at_target INT, target TEXT, id TEXT)");
       init.execute("CREATE TABLE IF NOT EXISTS files (system TEXT, file TEXT, ms_since_unix_epoch INT, sha256 TEXT)");
       init.execute("CREATE TABLE IF NOT EXISTS symlinks (system TEXT, src TEXT, dst TEXT)");
       init.execute("CREATE TABLE IF NOT EXISTS hardlinks (system TEXT, src TEXT, dst TEXT)");
@@ -415,6 +425,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
+    queryBlobByHash = conn.prepareStatement("SELECT rowid FROM blobs WHERE target=? AND sha256=? AND num_bytes=? LIMIT 1");
     insertBlobRecord = conn.prepareStatement("INSERT INTO blobs (sha256, num_bytes, num_bytes_at_target, target, id) VALUES (?, ?, ?, ?, ?)");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, sha256) VALUES (?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
