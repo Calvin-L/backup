@@ -406,7 +406,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
       init.execute("CREATE TABLE IF NOT EXISTS hardlinks (system TEXT, src TEXT, dst TEXT)");
 
       // unique indexes
-      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS blob_hashes ON blobs (sha256, target)");
+      init.execute("CREATE UNIQUE INDEX IF NOT EXISTS blob_hashes ON blobs (target, sha256, num_bytes)");
       init.execute("CREATE UNIQUE INDEX IF NOT EXISTS file_index ON files (system, file)");
     }
     conn.commit();

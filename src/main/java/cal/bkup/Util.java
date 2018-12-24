@@ -52,6 +52,17 @@ public abstract class Util {
     return md;
   }
 
+  public static long copyStreamAndCaptureSize(InputStream in, OutputStream out) throws IOException {
+    byte[] buf = MEM_BUFFER.get();
+    long count = 0;
+    int n;
+    while ((n = in.read(buf)) >= 0) {
+      out.write(buf, 0, n);
+      count += n;
+    }
+    return count;
+  }
+
   public static Sha256AndSize copyStreamAndCaptureSha256(InputStream in, OutputStream out) throws IOException {
     byte[] buf = MEM_BUFFER.get();
     long count = 0;
@@ -210,6 +221,19 @@ public abstract class Util {
       result = Math.max(result, array[i]);
     }
     return result;
+  }
+
+  public static void run(String... args) throws IOException {
+    Process p = new ProcessBuilder(args)
+            .inheritIO()
+            .start();
+    while (true) {
+      try {
+        p.waitFor();
+        break;
+      } catch (InterruptedException ignored) {
+      }
+    }
   }
 
 }

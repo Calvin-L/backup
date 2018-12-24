@@ -388,7 +388,7 @@ public class GlacierBackupTarget implements BackupTarget {
       }
 
       @Override
-      public Void exec() throws IOException {
+      public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
         client.deleteArchive(new DeleteArchiveRequest()
             .withVaultName(vaultName)
             .withArchiveId(obj.idAtTarget().toString()));
@@ -423,7 +423,7 @@ public class GlacierBackupTarget implements BackupTarget {
       }
 
       @Override
-      public Void exec() throws IOException {
+      public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
         Map<ResourceInfo, String> jobs = new HashMap<>();
         for (ResourceInfo i : infos) {
           InitiateJobResult initJobRes = client.initiateJob(new InitiateJobRequest()

@@ -13,6 +13,7 @@ import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Sha256AndSize;
 import org.crashsafeio.AtomicDurableOutputStream;
+import org.crashsafeio.DurableIOUtil;
 
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
@@ -51,10 +52,10 @@ public class FilesystemBackupTarget implements BackupTarget {
     if (Files.exists(dst)) {
       throw new IOException("refusing to overwrite " + dst);
     }
-    Files.createDirectories(dst.getParent());
-    final Sha256AndSize copyResult;
+    DurableIOUtil.createFolders(dst.getParent());
+    final long size;
     try (OutputStream out = new AtomicDurableOutputStream(dst)) {
-      copyResult = Util.copyStreamAndCaptureSha256(data, out);
+      size = Util.copyStreamAndCaptureSize(data, out);
     }
     final Id id = new Id(dst.toString());
     return new BackupReport() {
@@ -65,7 +66,7 @@ public class FilesystemBackupTarget implements BackupTarget {
 
       @Override
       public long sizeAtTarget() {
-        return copyResult.size();
+        return size;
       }
     };
   }
@@ -130,7 +131,7 @@ public class FilesystemBackupTarget implements BackupTarget {
     Path path = root.resolve(id.toString());
     return new FreeOp<Void>() {
       @Override
-      public Void exec() throws IOException {
+      public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
         Files.deleteIfExists(path);
         return null;
       }
@@ -150,7 +151,7 @@ public class FilesystemBackupTarget implements BackupTarget {
   public Op<Void> fetch(Collection<ResourceInfo> infos, IOConsumer<Pair<ResourceInfo, InputStream>> callback) {
     return new FreeOp<Void>() {
       @Override
-      public Void exec() throws IOException {
+      public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
         for (ResourceInfo i : infos) {
           Path p = Paths.get(i.idAtTarget().toString());
           callback.accept(new Pair<>(i, new FileInputStream(p.toFile())));

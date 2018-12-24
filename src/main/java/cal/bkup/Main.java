@@ -8,6 +8,7 @@ import cal.bkup.impls.FilesystemBackupTarget;
 import cal.bkup.impls.FreeOp;
 import cal.bkup.impls.GlacierBackupTarget;
 import cal.bkup.impls.LocalDirectory;
+import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.S3Directory;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.SqliteCheckpoint2;
@@ -39,6 +40,7 @@ import org.apache.commons.cli.ParseException;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -245,34 +247,46 @@ public class Main {
 
             Instant start = Instant.now();
             AtomicReference<Instant> lastSaveRef = new AtomicReference<>(start);
-            for (Op<?> op : plan) {
-              System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
-              executor.execute(() -> {
-                try {
-                  op.exec();
-                  long ndone = done.incrementAndGet();
-                  System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
-                  numSuccessful.incrementAndGet();
-                  if (backup) {
-                    Instant now = Instant.now();
-                    Instant lastSave = lastSaveRef.get();
-                    synchronized (checkpoint) {
-                      if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
-                        try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
-                          checkpoint.save(out);
+
+            try (ProgressDisplay display = new ProgressDisplay()) {
+              for (Op<?> op : plan) {
+                final ProgressDisplay.Task t = display.startTask(op.toString());
+                display.reportProgress(t, done.get(), plan.size());
+//                System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
+                executor.execute(() -> {
+                  try {
+                    op.exec((numerator, denominator) -> {
+                      try {
+                        display.reportProgress(t, numerator, denominator);
+                      } catch (IOException e) {
+                        throw new IOError(e);
+                      }
+                    });
+                    display.finishTask(t);
+                    long ndone = done.incrementAndGet();
+//                    System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
+                    numSuccessful.incrementAndGet();
+                    if (backup) {
+                      Instant now = Instant.now();
+                      Instant lastSave = lastSaveRef.get();
+                      synchronized (checkpoint) {
+                        if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
+                          try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+                            checkpoint.save(out);
+                          }
+                          lastSaveRef.set(now);
                         }
-                        lastSaveRef.set(now);
                       }
                     }
+                  } catch (Exception e) {
+                    onError(e);
                   }
-                } catch (Exception e) {
-                  onError(e);
-                }
-              });
-            }
+                });
+              }
 
-            executor.shutdown();
-            executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+              executor.shutdown();
+              executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+            }
           } finally {
             long nbkup = numSuccessful.get();
             System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
@@ -375,7 +389,7 @@ public class Main {
           if (!Objects.equals(symlink.dst(), checkpointedSymlinks.get(symlink.src()))) {
             ops.add(new FreeOp<Void>() {
               @Override
-              public Void exec() throws IOException {
+              public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
                 checkpoint.noteSymLink(config.systemName(), symlink);
                 return null;
               }
@@ -394,7 +408,7 @@ public class Main {
           if (!Objects.equals(hardlink.dst(), checkpointedHardlinks.get(hardlink.src()))) {
             ops.add(new FreeOp<Void>() {
               @Override
-              public Void exec() throws IOException {
+              public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
                 checkpoint.noteHardLink(config.systemName(), hardlink);
                 return null;
               }
@@ -431,7 +445,7 @@ public class Main {
               }
 
               @Override
-              public Void exec() throws IOException {
+              public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
                 StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open());
                 BackupReport report;
                 try (InputStream toClose = stream) {
@@ -474,7 +488,7 @@ public class Main {
     for (Path p : filesToRemove) {
       ops.add(new FreeOp<Void>() {
         @Override
-        public Void exec() throws IOException {
+        public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
           checkpoint.forgetBackup(config.systemName(), p);
           return null;
         }
@@ -489,7 +503,7 @@ public class Main {
     for (Path p : symLinksToRemove) {
       ops.add(new FreeOp<Void>() {
         @Override
-        public Void exec() throws IOException {
+        public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
           checkpoint.forgetSymLink(config.systemName(), p);
           return null;
         }
@@ -504,7 +518,7 @@ public class Main {
     for (Path p : hardLinksToRemove) {
       ops.add(new FreeOp<Void>() {
         @Override
-        public Void exec() throws IOException {
+        public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
           checkpoint.forgetHardLink(config.systemName(), p);
           return null;
         }
