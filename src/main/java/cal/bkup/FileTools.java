@@ -93,11 +93,11 @@ public class FileTools {
 
                       @Override
                       public InputStream open() throws IOException {
-                        return new FileInputStream(path().toString());
+                        return Files.newInputStream(path);
                       }
 
                       @Override
-                      public long sizeEstimateInBytes() throws IOException {
+                      public long sizeEstimateInBytes() {
                         return size;
                       }
                     });
