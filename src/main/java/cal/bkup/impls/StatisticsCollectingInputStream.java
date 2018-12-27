@@ -66,7 +66,13 @@ public class StatisticsCollectingInputStream extends FilterInputStream {
   }
 
   public byte[] getSha256Digest() {
-    return digest.digest();
+    try {
+      // .digest() resets the darn thing!
+      // So, we gotta clone it first...
+      return ((MessageDigest)digest.clone()).digest();
+    } catch (CloneNotSupportedException e) {
+      throw new UnsupportedOperationException(e);
+    }
   }
 
   public long getBytesRead() {
