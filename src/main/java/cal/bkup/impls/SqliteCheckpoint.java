@@ -229,6 +229,11 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
+  public BackupReport findBlob(BackupTarget target, byte[] sha256, long numBytes) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public synchronized Stream<SymLink> symlinks(Id system) throws IOException {
     List<SymLink> res = new ArrayList<>();
 

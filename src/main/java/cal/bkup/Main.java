@@ -38,6 +38,7 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
+import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOError;
@@ -55,6 +56,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -272,7 +274,9 @@ public class Main {
                       synchronized (checkpoint) {
                         if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
                           try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+                            System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
                             checkpoint.save(out);
+                            System.out.println("Checkpointed!");
                           }
                           lastSaveRef.set(now);
                         }
@@ -293,7 +297,9 @@ public class Main {
             if (backup) {
               Instant now = Instant.now();
               try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+                System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
                 checkpoint.save(out);
+                System.out.println("Checkpointed!");
               }
             }
           }
@@ -446,21 +452,45 @@ public class Main {
 
               @Override
               public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
+                // compute sha256 and size
                 StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open());
-                BackupReport report;
-                try (InputStream toClose = stream) {
-                  report = target.backup(toClose, estimatedSize);
+                try (InputStream in = new BufferedInputStream(stream)) {
+                  int x;
+                  do {
+                    x = in.read();
+                  } while (x >= 0);
                 }
-                assert stream.isClosed();
+                byte[] originalSha256 = stream.getSha256Digest();
+                long originalSize = stream.getBytesRead();
+
+                // determine whether the data is already backed up
+                BackupReport report = checkpoint.findBlob(target, originalSha256, originalSize);
+                if (report == null) {
+                  // if the data is not already backed up, back it up!
+                  stream = new StatisticsCollectingInputStream(resource.open());
+                  try (InputStream toClose = stream) {
+                    report = target.backup(toClose, estimatedSize);
+                  }
+                  assert stream.isClosed();
+
+                  // TODO: abort!
+                  if (!Arrays.equals(originalSha256, stream.getSha256Digest()) || originalSize != stream.getBytesRead()) {
+                    throw new ConcurrentModificationException(resource + " was modified during backup");
+                  }
+                }
+
+                byte[] finalSha256 = stream.getSha256Digest();
+                long finalSize = stream.getBytesRead();
+
                 checkpoint.noteSuccessfulBackup(target, resource, new Sha256AndSize() {
                   @Override
                   public byte[] sha256() {
-                    return stream.getSha256Digest();
+                    return finalSha256;
                   }
 
                   @Override
                   public long size() {
-                    return stream.getBytesRead();
+                    return finalSize;
                   }
                 }, report);
                 return null;

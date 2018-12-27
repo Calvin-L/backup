@@ -227,14 +227,11 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   public void save(OutputStream out) throws IOException {
     try {
       synchronized (this) {
-        long timestamp = Instant.now().toEpochMilli();
-        System.out.println("Saving checkpoint [" + timestamp + ']');
         close();
         try (InputStream reader = new FileInputStream(file.toString())) {
           Util.copyStream(reader, out);
         }
         reopen();
-        System.out.println("Checkpointed!");
       }
     } catch (SQLException e) {
       throw new IOException(e);
@@ -292,6 +289,39 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     }
 
     return res.stream();
+  }
+
+  @Override
+  public BackupReport findBlob(BackupTarget target, byte[] sha256, long numBytes) throws IOException {
+    String sha256string = Util.sha256toString(sha256);
+    try {
+      queryBlobByHash.setString(1, target.name().toString());
+      queryBlobByHash.setString(2, sha256string);
+      queryBlobByHash.setLong(3, numBytes);
+
+      try (ResultSet rs = queryBlobByHash.executeQuery()) {
+        if (rs.next()) {
+          Id id = new Id(rs.getString("id"));
+          long size = rs.getLong("num_bytes_at_target");
+          return new BackupReport() {
+            @Override
+            public Id idAtTarget() {
+              return id;
+            }
+
+            @Override
+            public long sizeAtTarget() {
+              return size;
+            }
+          };
+        }
+      }
+
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+
+    return null;
   }
 
   @Override
@@ -425,7 +455,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
-    queryBlobByHash = conn.prepareStatement("SELECT rowid FROM blobs WHERE target=? AND sha256=? AND num_bytes=? LIMIT 1");
+    queryBlobByHash = conn.prepareStatement("SELECT id, num_bytes_at_target FROM blobs WHERE target=? AND sha256=? AND num_bytes=? LIMIT 1");
     insertBlobRecord = conn.prepareStatement("INSERT INTO blobs (sha256, num_bytes, num_bytes_at_target, target, id) VALUES (?, ?, ?, ?, ?)");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, sha256) VALUES (?, ?, ?, ?)");
     insertSymLink = conn.prepareStatement("INSERT OR REPLACE INTO symlinks (system, src, dst) VALUES (?, ?, ?)");
