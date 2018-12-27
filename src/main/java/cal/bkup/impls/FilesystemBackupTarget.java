@@ -9,15 +9,11 @@ import cal.bkup.types.Id;
 import cal.bkup.types.Op;
 import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
-import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
-import cal.bkup.types.Sha256AndSize;
 import org.crashsafeio.AtomicDurableOutputStream;
 import org.crashsafeio.DurableIOUtil;
 
-import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOError;
 import java.io.IOException;
 import java.io.InputStream;
@@ -53,7 +49,9 @@ public class FilesystemBackupTarget implements BackupTarget {
     if (Files.exists(dst)) {
       throw new IOException("refusing to overwrite " + dst);
     }
-    DurableIOUtil.createFolders(dst.getParent());
+    synchronized (this) {
+      DurableIOUtil.createFolders(dst.getParent());
+    }
     final long size;
     try (OutputStream out = new AtomicDurableOutputStream(dst)) {
       size = Util.copyStreamAndCaptureSize(data, out);
