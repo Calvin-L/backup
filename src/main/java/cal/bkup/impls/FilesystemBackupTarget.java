@@ -84,7 +84,6 @@ public class FilesystemBackupTarget implements BackupTarget {
 
   @Override
   public Stream<BackedUpResourceInfo> list() throws IOException {
-    final BackupTarget target = this;
     return Files.list(root)
         .map(Path::getFileName)
         .map(Object::toString)
@@ -102,11 +101,6 @@ public class FilesystemBackupTarget implements BackupTarget {
                       }
                     })
                     .map(f -> new BackedUpResourceInfo() {
-                      @Override
-                      public BackupTarget target() {
-                        return target;
-                      }
-
                       @Override
                       public Id idAtTarget() {
                         return new Id(f);

@@ -306,13 +306,7 @@ public class GlacierBackupTarget implements BackupTarget {
               Id id = new Id(archiveId);
               long sz = size;
               Instant time = Instant.from(DateTimeFormatter.ISO_INSTANT.parse(creationDate));
-              BackupTarget self = this;
               res.add(new BackedUpResourceInfo() {
-                @Override
-                public BackupTarget target() {
-                  return self;
-                }
-
                 @Override
                 public Id idAtTarget() {
                   return id;
