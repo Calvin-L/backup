@@ -1,5 +1,6 @@
 package cal.bkup.impls;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,11 +25,17 @@ public class ProgressDisplay implements AutoCloseable {
   private long totalComplete;
   private final long totalTasks;
   private final List<Task> tasks;
+  private final Runnable refreshDisplay;
 
   public ProgressDisplay(long totalTasks) {
     tasks = new ArrayList<>();
     this.totalTasks = totalTasks;
     totalComplete = 0L;
+    refreshDisplay = new RateLimitedRunnable(Duration.ofMinutes(1), () -> {
+      for (Task t : tasks) {
+        printTask(t);
+      }
+    });
   }
 
   private static String formatPercent(long numerator, long denominator) {
@@ -66,7 +73,7 @@ public class ProgressDisplay implements AutoCloseable {
   public synchronized void reportProgress(Task task, long progress, long denominator) {
     task.progress = progress;
     task.denominator = denominator;
-    printTask(task);
+    refreshDisplay.run();
   }
 
   public synchronized void finishTask(Task task) {
