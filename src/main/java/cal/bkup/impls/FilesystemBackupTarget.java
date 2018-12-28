@@ -36,6 +36,12 @@ public class FilesystemBackupTarget implements BackupTarget {
     this.root = root;
   }
 
+  private Path location(UUID id) {
+    String uuid = id.toString();
+    String prefix = uuid.substring(0, 2);
+    return root.resolve(prefix).resolve(uuid);
+  }
+
   @Override
   public Id name() {
     return id;
@@ -43,9 +49,8 @@ public class FilesystemBackupTarget implements BackupTarget {
 
   @Override
   public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
-    String uuid = UUID.randomUUID().toString();
-    String prefix = uuid.substring(0, 2);
-    Path dst = root.resolve(prefix).resolve(uuid);
+    UUID uuid = UUID.randomUUID();
+    Path dst = location(uuid);
     if (Files.exists(dst)) {
       throw new IOException("refusing to overwrite " + dst);
     }
@@ -56,7 +61,7 @@ public class FilesystemBackupTarget implements BackupTarget {
     try (OutputStream out = new AtomicDurableOutputStream(dst)) {
       size = Util.copyStreamAndCaptureSize(data, out);
     }
-    final Id id = new Id(dst.toString());
+    final Id id = new Id(uuid.toString());
     return new BackupReport() {
       @Override
       public Id idAtTarget() {
@@ -129,9 +134,8 @@ public class FilesystemBackupTarget implements BackupTarget {
   }
 
   @Override
-  public Op<Void> delete(BackedUpResourceInfo id) throws IOException {
-    String uuid = id.idAtTarget().toString();
-    Path path = root.resolve(uuid.substring(0, 2)).resolve(uuid);
+  public Op<Void> delete(BackedUpResourceInfo id) {
+    Path path = location(UUID.fromString(id.idAtTarget().toString()));
     return new FreeOp<Void>() {
       @Override
       public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
