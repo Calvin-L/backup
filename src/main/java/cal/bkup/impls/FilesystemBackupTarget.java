@@ -160,7 +160,7 @@ public class FilesystemBackupTarget implements BackupTarget {
       @Override
       public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
         for (ResourceInfo i : infos) {
-          Path p = Paths.get(i.idAtTarget().toString());
+          Path p = location(UUID.fromString(i.idAtTarget().toString()));
           callback.accept(new Pair<>(i, new FileInputStream(p.toFile())));
         }
         return null;
