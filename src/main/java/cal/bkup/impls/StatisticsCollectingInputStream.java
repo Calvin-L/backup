@@ -6,16 +6,19 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
+import java.util.function.Consumer;
 
 public class StatisticsCollectingInputStream extends FilterInputStream {
 
   private final MessageDigest digest;
+  private final Consumer<StatisticsCollectingInputStream> onProgress;
   private long bytesRead;
   private boolean closed;
 
-  public StatisticsCollectingInputStream(InputStream in) {
+  public StatisticsCollectingInputStream(InputStream in, Consumer<StatisticsCollectingInputStream> onProgress) {
     super(in);
     digest = Util.sha256Digest();
+    this.onProgress = onProgress;
     bytesRead = 0L;
     closed = false;
   }
@@ -26,6 +29,7 @@ public class StatisticsCollectingInputStream extends FilterInputStream {
     if (res >= 0) {
       digest.update((byte)res);
       bytesRead++;
+      onProgress.accept(this);
     }
     return res;
   }
@@ -41,6 +45,7 @@ public class StatisticsCollectingInputStream extends FilterInputStream {
     if (nread > 0) {
       digest.update(b, off, nread);
       bytesRead += nread;
+      onProgress.accept(this);
     }
     return nread;
   }

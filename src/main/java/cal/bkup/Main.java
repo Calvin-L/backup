@@ -245,28 +245,16 @@ public class Main {
                 queue,
                 new ThreadPoolExecutor.CallerRunsPolicy());
 
-            AtomicLong done = new AtomicLong(0);
-
             Instant start = Instant.now();
             AtomicReference<Instant> lastSaveRef = new AtomicReference<>(start);
 
-            try (ProgressDisplay display = new ProgressDisplay()) {
+            try (ProgressDisplay display = new ProgressDisplay(plan.size())) {
               for (Op<?> op : plan) {
                 final ProgressDisplay.Task t = display.startTask(op.toString());
-                display.reportProgress(t, done.get(), plan.size());
-//                System.out.println("[" + String.format("%2d", done.get() * 100 / plan.size()) + "%] starting " + op);
                 executor.execute(() -> {
                   try {
-                    op.exec((numerator, denominator) -> {
-                      try {
-                        display.reportProgress(t, numerator, denominator);
-                      } catch (IOException e) {
-                        throw new IOError(e);
-                      }
-                    });
+                    op.exec((numerator, denominator) -> display.reportProgress(t, numerator, denominator));
                     display.finishTask(t);
-                    long ndone = done.incrementAndGet();
-//                    System.out.println("[" + String.format("%2d", ndone * 100 / plan.size()) + "%] finished " + op);
                     numSuccessful.incrementAndGet();
                     if (backup) {
                       Instant now = Instant.now();
@@ -453,7 +441,7 @@ public class Main {
               @Override
               public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
                 // compute sha256 and size
-                StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open());
+                StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open(), s -> progressCallback.reportProgress(s.getBytesRead(), estimatedSize * 2));
                 try (InputStream in = new BufferedInputStream(stream)) {
                   int x;
                   do {
@@ -467,8 +455,8 @@ public class Main {
                 BackupReport report = checkpoint.findBlob(target, originalSha256, originalSize);
                 if (report == null) {
                   // if the data is not already backed up, back it up!
-                  stream = new StatisticsCollectingInputStream(resource.open());
-                  try (InputStream toClose = stream) {
+                  stream = new StatisticsCollectingInputStream(resource.open(), s -> progressCallback.reportProgress(originalSize + s.getBytesRead(), estimatedSize * 2));
+                  try (InputStream toClose = new BufferedInputStream(stream)) {
                     report = target.backup(toClose, estimatedSize);
                   }
                   assert stream.isClosed();
@@ -498,7 +486,8 @@ public class Main {
 
               @Override
               public String toString() {
-                return resource.path().toString() + " [" + checkpointModTime + " --> " + resourceModTime + ']';
+                String startTime = checkpointModTime == null ? "missing" : checkpointModTime.toString();
+                return resource.path().toString() + " [" + startTime + " --> " + resourceModTime + ']';
               }
             });
           } else {

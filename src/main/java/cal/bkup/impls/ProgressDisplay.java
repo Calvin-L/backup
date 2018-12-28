@@ -1,8 +1,5 @@
 package cal.bkup.impls;
 
-import cal.bkup.Util;
-
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,32 +21,31 @@ public class ProgressDisplay implements AutoCloseable {
     void reportProgress(long numerator, long denominator);
   }
 
-  private static void moveCursorUpOneLine() throws IOException {
-    Util.run("tput", "cuu1");
-//    System.out.println("^1");
-  }
-
-  private static void clearCurrentLine() throws IOException {
-    Util.run("tput", "el");
-//    System.out.println("clr");
-  }
-
-  private static void clearLines(int n) throws IOException {
-    for (int i = 0; i < n; ++i) {
-      moveCursorUpOneLine();
-      clearCurrentLine();
-    }
-  }
-
+  private long totalComplete;
+  private final long totalTasks;
   private final List<Task> tasks;
 
-  public ProgressDisplay() throws IOException {
-    Util.run("tput", "rmam");
+  public ProgressDisplay(long totalTasks) {
     tasks = new ArrayList<>();
+    this.totalTasks = totalTasks;
+    totalComplete = 0L;
+  }
+
+  private static String formatPercent(long numerator, long denominator) {
+    if (numerator < 0) {
+      throw new IllegalArgumentException("negative numerator: " + numerator);
+    }
+    if (denominator < 0) {
+      throw new IllegalArgumentException("negative denominator: " + denominator);
+    }
+    if (numerator > denominator) {
+      return "100%";
+    }
+    return String.format("%3d", numerator * 100 / denominator) + '%';
   }
 
   private void printTask(Task task) {
-    System.out.println("[" + String.format("%2d", task.progress * 100 / task.denominator) + "%] " + task.description);
+    System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(task.progress, task.denominator) + "] " + task.description);
   }
 
   public synchronized Task startTask(String description) {
@@ -67,31 +63,22 @@ public class ProgressDisplay implements AutoCloseable {
     return index;
   }
 
-  private void printTasksFromIndex(int index) throws IOException {
-    for (int i = index; i < tasks.size(); ++i) {
-      printTask(tasks.get(i));
-    }
-  }
-
-  public synchronized void reportProgress(Task task, long progress, long denominator) throws IOException {
-    int index = findTask(task);
+  public synchronized void reportProgress(Task task, long progress, long denominator) {
     task.progress = progress;
     task.denominator = denominator;
-    clearLines(tasks.size() - index);
-    printTasksFromIndex(index);
+    printTask(task);
   }
 
-  public synchronized void finishTask(Task task) throws IOException {
+  public synchronized void finishTask(Task task) {
+    ++totalComplete;
     int index = findTask(task);
-    clearLines(tasks.size() - index);
     tasks.remove(index);
-    printTasksFromIndex(index);
+    task.progress = task.denominator = 1L;
+    printTask(task);
   }
 
   @Override
-  public synchronized void close() throws IOException {
-    clearLines(tasks.size());
-    Util.run("tput", "smam");
+  public synchronized void close() {
     tasks.clear();
   }
 
