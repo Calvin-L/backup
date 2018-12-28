@@ -292,7 +292,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public BackupReport findBlob(BackupTarget target, byte[] sha256, long numBytes) throws IOException {
+  public synchronized BackupReport findBlob(BackupTarget target, byte[] sha256, long numBytes) throws IOException {
     String sha256string = Util.sha256toString(sha256);
     try {
       queryBlobByHash.setString(1, target.name().toString());
