@@ -11,7 +11,6 @@ import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Sha256AndSize;
-import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 
 import java.io.BufferedOutputStream;
@@ -33,8 +32,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
-
-import static java.awt.SystemColor.info;
 
 public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 

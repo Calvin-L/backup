@@ -2,7 +2,6 @@ package cal.bkup;
 
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Price;
-import cal.bkup.types.Sha256AndSize;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Console;

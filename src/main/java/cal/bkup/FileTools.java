@@ -10,7 +10,6 @@ import cal.bkup.types.SymLink;
 import jnr.posix.POSIX;
 import jnr.posix.POSIXFactory;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileVisitResult;

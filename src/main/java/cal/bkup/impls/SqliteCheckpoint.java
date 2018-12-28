@@ -7,11 +7,9 @@ import cal.bkup.types.Checkpoint;
 import cal.bkup.types.CheckpointFormat;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
-import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Resource;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Sha256AndSize;
-import cal.bkup.types.SimpleDirectory;
 import cal.bkup.types.SymLink;
 
 import java.io.BufferedOutputStream;
@@ -32,9 +30,6 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalLong;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
