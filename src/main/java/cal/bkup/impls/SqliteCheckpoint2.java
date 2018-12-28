@@ -418,7 +418,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized void close() throws IOException, SQLException {
+  public synchronized void close() throws SQLException {
     conn.commit();
     if (insertFileRecord != null) { insertFileRecord.close(); insertFileRecord = null; }
     if (insertSymLink != null) { insertSymLink.close(); insertSymLink = null; }
@@ -434,7 +434,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     if (conn != null) { conn.close(); conn = null; }
   }
 
-  private void reopen() throws IOException, SQLException {
+  private void reopen() throws SQLException {
 
     conn = DriverManager.getConnection("jdbc:sqlite:" + file.toAbsolutePath());
     conn.setAutoCommit(false);
