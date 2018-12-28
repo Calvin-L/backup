@@ -1,5 +1,6 @@
 package cal.bkup.impls;
 
+import cal.bkup.Util;
 import es.vocali.util.AESCrypt;
 
 import java.io.FilterInputStream;
@@ -18,7 +19,7 @@ public class EncryptedInputStream extends FilterInputStream {
   private final AtomicBoolean fail = new AtomicBoolean(false);
 
   public EncryptedInputStream(InputStream wrappedStream, String password) throws GeneralSecurityException, IOException {
-    super(new PipedInputStream(4096));
+    super(new PipedInputStream(Util.SUGGESTED_BUFFER_SIZE));
     PipedOutputStream out = new PipedOutputStream((PipedInputStream)in);
     encryptionThread = new Thread(() -> {
       try (PipedOutputStream cpy = out; /* ensure that "out" gets closed */

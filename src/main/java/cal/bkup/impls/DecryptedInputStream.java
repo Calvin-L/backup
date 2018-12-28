@@ -22,7 +22,7 @@ public class DecryptedInputStream extends FilterInputStream {
   private final AtomicReference<Throwable> fail = new AtomicReference<>(null);
 
   public DecryptedInputStream(InputStream wrappedStream, String password) throws GeneralSecurityException, IOException {
-    super(new PipedInputStream(4096));
+    super(new PipedInputStream(Util.SUGGESTED_BUFFER_SIZE));
     PipedOutputStream out = new PipedOutputStream((PipedInputStream)in);
     decryptionThread = new Thread(() -> {
       try (PipedOutputStream cpy = out; /* ensure that "out" gets closed */

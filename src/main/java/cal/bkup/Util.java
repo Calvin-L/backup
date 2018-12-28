@@ -27,7 +27,9 @@ public abstract class Util {
   public static final long ONE_GB = ONE_MB * 1024;
   public static final long ONE_TB = ONE_GB * 1024;
 
-  private static final ThreadLocal<byte[]> MEM_BUFFER = ThreadLocal.withInitial(() -> new byte[4096]);
+  public static final int SUGGESTED_BUFFER_SIZE = 8192;
+
+  private static final ThreadLocal<byte[]> MEM_BUFFER = ThreadLocal.withInitial(() -> new byte[SUGGESTED_BUFFER_SIZE]);
 
   public static long copyStream(InputStream in, OutputStream out) throws IOException {
     byte[] buf = MEM_BUFFER.get();
@@ -156,7 +158,7 @@ public abstract class Util {
   }
 
   public static InputStream createInputStream(IOConsumer<OutputStream> writer) throws IOException {
-    PipedInputStream in = new PipedInputStream(4096);
+    PipedInputStream in = new PipedInputStream(SUGGESTED_BUFFER_SIZE);
     PipedOutputStream out = new PipedOutputStream(in);
     AtomicReference<Exception> err = new AtomicReference<>(null);
     Thread t = new Thread(() -> {

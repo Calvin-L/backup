@@ -442,7 +442,7 @@ public class Main {
               public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
                 // compute sha256 and size
                 StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open(), s -> progressCallback.reportProgress(s.getBytesRead(), estimatedSize * 2));
-                try (InputStream in = new BufferedInputStream(stream)) {
+                try (InputStream in = new BufferedInputStream(stream, Util.SUGGESTED_BUFFER_SIZE)) {
                   int x;
                   do {
                     x = in.read();
@@ -456,7 +456,7 @@ public class Main {
                 if (report == null) {
                   // if the data is not already backed up, back it up!
                   stream = new StatisticsCollectingInputStream(resource.open(), s -> progressCallback.reportProgress(originalSize + s.getBytesRead(), estimatedSize * 2));
-                  try (InputStream toClose = new BufferedInputStream(stream)) {
+                  try (InputStream toClose = new BufferedInputStream(stream, Util.SUGGESTED_BUFFER_SIZE)) {
                     report = target.backup(toClose, estimatedSize);
                   }
                   assert stream.isClosed();
