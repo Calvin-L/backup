@@ -171,6 +171,7 @@ public class Main {
           plan.addAll(planBackup(config, checkpoint, target).collect(Collectors.toList()));
         }
         if (gc) {
+          // TODO: clean up checkpoints too
           Set<Id> ids = checkpoint.list()
               .filter(info -> info.target().equals(target.name()))
               .map(ResourceInfo::idAtTarget)
