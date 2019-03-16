@@ -45,8 +45,8 @@ public class EncryptedBackupTarget implements BackupTarget {
    * @return roughly how many bytes the encrypted version of the data will occupy
    */
   private long encryptedSizeEstimate(long originalSize) {
-    // TODO: is this right? can we do better?
-    return originalSize;
+    // Empirically, the encryption seems to add ~130-160 bytes of overhead.
+    return originalSize + 160;
   }
 
   @Override
