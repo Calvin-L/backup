@@ -55,6 +55,10 @@ public class DirectoryBackedCheckpointSequence implements CheckpointSequence {
     OptionalLong doublecheck = parseNameAsSequenceNumber(name);
     assert doublecheck.isPresent();
     assert doublecheck.getAsLong() == checkpointNumber;
+    OptionalLong oldMax = checkpointIDs().max();
+    if (oldMax.isPresent() && checkpointNumber <= oldMax.getAsLong()) {
+      throw new IllegalArgumentException("new checkpoint number " + checkpointNumber + " is smaller than old checkpoint number " + oldMax.getAsLong());
+    }
     return location.createOrReplace(name);
   }
 }
