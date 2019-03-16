@@ -114,12 +114,12 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
+  public synchronized void noteSuccessfulBackup(Id backupTargetName, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
     try {
       insertFileRecord.setString(1, r.system().toString());
       insertFileRecord.setString(2, r.path().toString());
       insertFileRecord.setLong(3, r.modTime().toEpochMilli());
-      insertFileRecord.setString(4, target.name().toString());
+      insertFileRecord.setString(4, backupTargetName.toString());
       insertFileRecord.setString(5, report.idAtTarget().toString());
       insertFileRecord.executeUpdate();
     } catch (SQLException e) {
@@ -212,6 +212,13 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
             @Override
             public Id idAtTarget() {
               return id;
+            }
+
+            @Override
+            public Sha256AndSize trueSummary() {
+              // Regrettably, I didn't realize I would need this when I
+              // wrote this checkpoint format.
+              throw new UnsupportedOperationException();
             }
           });
         }

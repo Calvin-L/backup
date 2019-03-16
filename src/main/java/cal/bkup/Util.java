@@ -156,6 +156,40 @@ public abstract class Util {
     return builder.toString();
   }
 
+  /**
+   * Convert a single hexadecimal digit to its integer value.
+   * @param c a character
+   * @return an int in the range [0, 15]
+   */
+  private static int hexValue(char c) {
+    try {
+      return Integer.parseInt("" + c, 16);
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException("character " + c + " is not a hex digit", e);
+    }
+  }
+
+  /**
+   * Inverse of {@link #sha256toString(byte[])}.
+   * @param sha256
+   * @return
+   */
+  public static byte[] stringToSha256(CharSequence sha256) {
+    int len = sha256.length();
+    if (len != 64) {
+      throw new IllegalArgumentException("string has the wrong length to be a SHA-256 sum (should be 64, was " + len + ')');
+    }
+    byte[] sum = new byte[32];
+    for (int i = 0; i < sum.length; ++i) {
+      char c1 = sha256.charAt(i * 2);
+      char c2 = sha256.charAt(i * 2 + 1);
+      int val1 = hexValue(c1);
+      int val2 = hexValue(c2);
+      sum[i] = (byte)(val1 << 4 | val2);
+    }
+    return sum;
+  }
+
   public static InputStream createInputStream(IOConsumer<OutputStream> writer) throws IOException {
     PipedInputStream in = new PipedInputStream(SUGGESTED_BUFFER_SIZE);
     PipedOutputStream out = new PipedOutputStream(in);

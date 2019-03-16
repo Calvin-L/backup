@@ -65,8 +65,15 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     public Checkpoint migrateFrom(Checkpoint oldCheckpoint) throws IOException {
       Checkpoint ck2 = createEmpty();
       oldCheckpoint.list().forEach(info -> {
+        Sha256AndSize trueSummary;
         try {
-          ck2.noteSuccessfulBackup(null, new Resource() {
+          trueSummary = info.trueSummary();
+        } catch (UnsupportedOperationException e) {
+          System.err.println("Dropping mystery file " + info.path());
+          return;
+        }
+        try {
+          ck2.noteSuccessfulBackup(info.target(), new Resource() {
             @Override
             public Id system() {
               return info.system();
@@ -91,7 +98,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
             public long sizeEstimateInBytes() {
               throw new UnsupportedOperationException();
             }
-          }, null, new BackupReport() {
+          }, trueSummary, new BackupReport() {
             @Override
             public Id idAtTarget() {
               return info.idAtTarget();
@@ -168,10 +175,10 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   }
 
   @Override
-  public synchronized void noteSuccessfulBackup(BackupTarget target, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
+  public synchronized void noteSuccessfulBackup(Id backupTargetName, Resource r, Sha256AndSize contentSummary, BackupReport report) throws IOException {
     String sha256 = Util.sha256toString(contentSummary.sha256());
     try {
-      queryBlobByHash.setString(1, target.name().toString());
+      queryBlobByHash.setString(1, backupTargetName.toString());
       queryBlobByHash.setString(2, sha256);
       queryBlobByHash.setLong(3, contentSummary.size());
 
@@ -180,7 +187,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
           insertBlobRecord.setString(1, sha256);
           insertBlobRecord.setLong(2, contentSummary.size());
           insertBlobRecord.setLong(3, report.sizeAtTarget());
-          insertBlobRecord.setString(4, target.name().toString());
+          insertBlobRecord.setString(4, backupTargetName.toString());
           insertBlobRecord.setString(5, report.idAtTarget().toString());
           insertBlobRecord.executeUpdate();
         }
@@ -248,6 +255,8 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
           Id id = new Id(rs.getString("id"));
           long ms = rs.getLong("ms_since_unix_epoch");
           Instant time = Instant.ofEpochMilli(ms);
+          String sha = rs.getString("sha256");
+          long size = rs.getLong("num_bytes");
           res.add(new ResourceInfo() {
             @Override
             public Id system() {
@@ -277,6 +286,21 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
             @Override
             public Id idAtTarget() {
               return id;
+            }
+
+            @Override
+            public Sha256AndSize trueSummary() {
+              return new Sha256AndSize() {
+                @Override
+                public byte[] sha256() {
+                  return Util.stringToSha256(sha);
+                }
+
+                @Override
+                public long size() {
+                  return size;
+                }
+              };
             }
           });
         }
@@ -449,7 +473,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     conn.commit();
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256 WHERE system=? AND file=? AND target=? LIMIT 1");
-    queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256");
+    queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch, files.sha256, num_bytes FROM files JOIN blobs ON files.sha256=blobs.sha256");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
     queryBlobByHash = conn.prepareStatement("SELECT id, num_bytes_at_target FROM blobs WHERE target=? AND sha256=? AND num_bytes=? LIMIT 1");

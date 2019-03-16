@@ -10,4 +10,5 @@ public interface ResourceInfo {
   Id target();
   Id idAtTarget();
   long sizeAtTarget();
+  Sha256AndSize trueSummary();
 }
