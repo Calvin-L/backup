@@ -25,6 +25,7 @@ public interface Checkpoint extends AutoCloseable {
 
   void save(OutputStream out) throws IOException;
 
+  Stream<Id> knownSystems() throws IOException;
   Stream<ResourceInfo> list() throws IOException;
   @Nullable BackupReport findBlob(BackupTarget target, byte[] sha256, long numBytes) throws IOException;
   Stream<SymLink> symlinks(Id system) throws IOException;

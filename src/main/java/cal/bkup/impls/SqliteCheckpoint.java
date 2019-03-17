@@ -72,6 +72,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
   private PreparedStatement queryModTime;
   private PreparedStatement insertFileRecord;
   private PreparedStatement queryAll;
+  private PreparedStatement querySystems;
   private PreparedStatement insertSymLink;
   private PreparedStatement querySymLinksBySystem;
   private PreparedStatement queryHardLinksBySystem;
@@ -168,6 +169,19 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
     } catch (SQLException e) {
       throw new IOException(e);
     }
+  }
+
+  @Override
+  public Stream<Id> knownSystems() throws IOException {
+    List<Id> systems = new ArrayList<>();
+    try (ResultSet rs = querySystems.executeQuery()) {
+      while (rs.next()) {
+        systems.add(new Id(rs.getString("system")));
+      }
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+    return systems.stream();
   }
 
   @Override
@@ -361,6 +375,7 @@ public class SqliteCheckpoint implements Checkpoint, AutoCloseable {
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files WHERE system=? AND file=? AND target=? LIMIT 1");
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch FROM files");
+    querySystems = conn.prepareStatement("SELECT DISTINCT system FROM (SELECT system FROM files UNION SELECT system FROM symlinks UNION SELECT system FROM hardlinks)");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
     insertFileRecord = conn.prepareStatement("INSERT OR REPLACE INTO files (system, file, ms_since_unix_epoch, target, id) VALUES (?, ?, ?, ?, ?)");

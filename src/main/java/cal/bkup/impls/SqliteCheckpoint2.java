@@ -69,10 +69,11 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
         try {
           trueSummary = info.trueSummary();
         } catch (UnsupportedOperationException e) {
-          System.err.println("Dropping mystery file " + info.path());
+          System.out.println("Dropping mystery file " + info.path() + " on " + info.system());
           return;
         }
         try {
+          System.out.println("Porting data for " + info.path() + " on " + info.system());
           ck2.noteSuccessfulBackup(info.target(), new Resource() {
             @Override
             public Id system() {
@@ -113,6 +114,32 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
           throw new RuntimeException(e);
         }
       });
+
+      oldCheckpoint.knownSystems().forEach(system -> {
+
+        try {
+          oldCheckpoint.symlinks(system).forEach(symLink -> {
+            System.out.println("Porting soft link " + symLink.src() + " --> " + symLink.dst() + " on " + system);
+            try {
+              ck2.noteSymLink(system, symLink);
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          });
+          oldCheckpoint.hardlinks(system).forEach(hardLink -> {
+            System.out.println("Porting hard link " + hardLink.src() + " --> " + hardLink.dst() + " on " + system);
+            try {
+              ck2.noteHardLink(system, hardLink);
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          });
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+
+      });
+
       return ck2;
     }
   };
@@ -123,6 +150,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
   private PreparedStatement insertBlobRecord;
   private PreparedStatement insertFileRecord;
   private PreparedStatement queryAll;
+  private PreparedStatement querySystems;
   private PreparedStatement queryBlobByHash;
   private PreparedStatement insertSymLink;
   private PreparedStatement querySymLinksBySystem;
@@ -240,6 +268,19 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
     } catch (SQLException e) {
       throw new IOException(e);
     }
+  }
+
+  @Override
+  public Stream<Id> knownSystems() throws IOException {
+    List<Id> systems = new ArrayList<>();
+    try (ResultSet rs = querySystems.executeQuery()) {
+      while (rs.next()) {
+        systems.add(new Id(rs.getString("system")));
+      }
+    } catch (SQLException e) {
+      throw new IOException(e);
+    }
+    return systems.stream();
   }
 
   @Override
@@ -474,6 +515,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 
     queryModTime = conn.prepareStatement("SELECT ms_since_unix_epoch FROM files JOIN blobs ON files.sha256=blobs.sha256 WHERE system=? AND file=? AND target=? LIMIT 1");
     queryAll = conn.prepareStatement("SELECT system, file, target, id, ms_since_unix_epoch, files.sha256, num_bytes FROM files JOIN blobs ON files.sha256=blobs.sha256");
+    querySystems = conn.prepareStatement("SELECT DISTINCT system FROM (SELECT system FROM files UNION SELECT system FROM symlinks UNION SELECT system FROM hardlinks)");
     querySymLinksBySystem = conn.prepareStatement("SELECT src, dst FROM symlinks WHERE system=?");
     queryHardLinksBySystem = conn.prepareStatement("SELECT src, dst FROM hardlinks WHERE system=?");
     queryBlobByHash = conn.prepareStatement("SELECT id, num_bytes_at_target FROM blobs WHERE target=? AND sha256=? AND num_bytes=? LIMIT 1");
