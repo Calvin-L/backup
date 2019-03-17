@@ -230,6 +230,11 @@ public class Main {
         Price cost = plan.stream().map(Op::cost).reduce(Price.ZERO, Price::plus);
         Price maint = plan.stream().map(Op::monthlyMaintenanceCost).reduce(Price.ZERO, Price::plus);
 
+        for (Op<?> op : plan) {
+          System.out.println(op);
+        }
+
+        System.out.println("-----------------------------------------");
         System.out.println("Execution plan:");
         System.out.println("    #ops: " + plan.size());
         System.out.println("    xfer: ~" + Util.divideAndRoundUp(bytesXferred, 1024 * 1024) + " Mb");
