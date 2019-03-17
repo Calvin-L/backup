@@ -39,6 +39,7 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
 import java.io.BufferedInputStream;
+import java.io.Console;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -236,6 +237,12 @@ public class Main {
         System.out.println("    maint: ~" + Util.formatPrice(maint));
         System.out.println("-----------------------------------------");
 
+        if (!Objects.equals(cost.plus(maint), Price.ZERO)) {
+          if (!confirm("Proceed?")) {
+            return;
+          }
+        }
+
         if (!dryRun) {
           try {
             BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
@@ -301,6 +308,15 @@ public class Main {
       throw new Exception("failed to get password");
     }
     System.exit(success.get() ? 0 : 1);
+  }
+
+  private static boolean confirm(String prompt) {
+    Console cons = System.console();
+    if (cons == null) {
+      return false;
+    }
+    String input = cons.readLine("%s [y/n] ", prompt);
+    return Character.toLowerCase(input.charAt(0)) == 'y';
   }
 
   private static class RawConfig {
