@@ -3,6 +3,7 @@ package cal.prim;
 import com.amazonaws.services.dynamodbv2.document.DynamoDB;
 import com.amazonaws.services.dynamodbv2.document.Expected;
 import com.amazonaws.services.dynamodbv2.document.Item;
+import com.amazonaws.services.dynamodbv2.document.PrimaryKey;
 import com.amazonaws.services.dynamodbv2.document.Table;
 import com.amazonaws.services.dynamodbv2.model.AmazonDynamoDBException;
 import com.amazonaws.services.dynamodbv2.model.AttributeDefinition;
@@ -16,6 +17,7 @@ import com.amazonaws.services.dynamodbv2.model.ResourceInUseException;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A {@link StringRegister} backed by Amazon's DynamoDB.
@@ -67,11 +69,16 @@ public class DynamoDBStringRegister implements StringRegister {
     this.registerName = registerName;
   }
 
+  // Dynamo does not accept null or empty values for strings.
+  private boolean isNull(String s) {
+    return s == null || s.length() == 0;
+  }
+
   @Override
   public String read() throws IOException {
     Item item = table.getItem(PRIMARY_KEY_FIELD, registerName);
     try {
-      return item == null ? null : item.getString(VALUE_FIELD);
+      return item == null ? "" : item.getString(VALUE_FIELD);
     } catch (AmazonDynamoDBException e) {
       throw new IOException(e);
     }
@@ -79,14 +86,19 @@ public class DynamoDBStringRegister implements StringRegister {
 
   @Override
   public void write(String expectedValue, String newValue) throws IOException, PreconditionFailed {
-    Item item = new Item()
-            .withPrimaryKey(PRIMARY_KEY_FIELD, registerName)
-            .withString(VALUE_FIELD, newValue);
+    Objects.requireNonNull(newValue, "new value may not be null");
+    Expected precondition = isNull(expectedValue) ?
+            new Expected(VALUE_FIELD).notExist() :
+            new Expected(VALUE_FIELD).eq(expectedValue);
     try {
-      table.putItem(item,
-              expectedValue == null ?
-                      new Expected(VALUE_FIELD).notExist() :
-                      new Expected(VALUE_FIELD).eq(expectedValue));
+      if (newValue.length() == 0) {
+        table.deleteItem(new PrimaryKey(PRIMARY_KEY_FIELD, registerName), precondition);
+      } else {
+        Item item = new Item()
+                .withPrimaryKey(PRIMARY_KEY_FIELD, registerName)
+                .withString(VALUE_FIELD, newValue);
+        table.putItem(item, precondition);
+      }
     } catch (ConditionalCheckFailedException e) {
       throw new PreconditionFailed(e);
     } catch (AmazonDynamoDBException e) {
