@@ -34,7 +34,6 @@ import com.amazonaws.services.glacier.model.StatusCode;
 import com.amazonaws.services.glacier.model.UploadArchiveRequest;
 import com.amazonaws.services.glacier.model.UploadArchiveResult;
 import com.amazonaws.services.glacier.model.UploadMultipartPartRequest;
-import com.amazonaws.services.glacier.model.UploadMultipartPartResult;
 import com.amazonaws.util.BinaryUtils;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -177,8 +176,7 @@ public class GlacierBackupTarget implements BackupTarget {
           .withChecksum(checksum)
           .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
 
-      UploadMultipartPartResult partResult = client.uploadMultipartPart(partRequest);
-      System.out.println("Part uploaded [file=???], checksum: " + partResult.getChecksum());
+      client.uploadMultipartPart(partRequest);
       total += n;
     }
 
