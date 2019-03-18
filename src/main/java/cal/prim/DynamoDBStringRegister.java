@@ -5,6 +5,7 @@ import com.amazonaws.services.dynamodbv2.document.Expected;
 import com.amazonaws.services.dynamodbv2.document.Item;
 import com.amazonaws.services.dynamodbv2.document.PrimaryKey;
 import com.amazonaws.services.dynamodbv2.document.Table;
+import com.amazonaws.services.dynamodbv2.document.spec.GetItemSpec;
 import com.amazonaws.services.dynamodbv2.model.AmazonDynamoDBException;
 import com.amazonaws.services.dynamodbv2.model.AttributeDefinition;
 import com.amazonaws.services.dynamodbv2.model.BillingMode;
@@ -76,7 +77,9 @@ public class DynamoDBStringRegister implements StringRegister {
 
   @Override
   public String read() throws IOException {
-    Item item = table.getItem(PRIMARY_KEY_FIELD, registerName);
+    Item item = table.getItem(new GetItemSpec()
+            .withPrimaryKey(PRIMARY_KEY_FIELD, registerName)
+            .withConsistentRead(true));
     try {
       return item == null ? "" : item.getString(VALUE_FIELD);
     } catch (AmazonDynamoDBException e) {
