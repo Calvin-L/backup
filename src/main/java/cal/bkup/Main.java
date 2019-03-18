@@ -31,6 +31,9 @@ import cal.bkup.types.Sha256AndSize;
 import cal.prim.SimpleDirectory;
 import cal.prim.StringRegister;
 import cal.bkup.types.SymLink;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
+import com.amazonaws.services.dynamodbv2.document.DynamoDB;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -578,7 +581,11 @@ public class Main {
     Path cacheLoc = Paths.get("/tmp/s3cache");
     SimpleDirectory rawDir = local ?
         LocalDirectory.TMP :
-        new CachedDirectory(new S3Directory(S3_BUCKET, S3_ENDPOINT), cacheLoc);
+        new CachedDirectory(new S3Directory(AmazonS3ClientBuilder
+                        .standard()
+                        .withCredentials(AWSTools.credentialsProvider())
+                        .withRegion(AWS_REGION)
+                        .build(), S3_BUCKET), cacheLoc);
     return new XZCompressedDirectory(new EncryptedDirectory(rawDir, password));
   }
 

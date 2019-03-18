@@ -23,13 +23,9 @@ public class S3Directory implements SimpleDirectory {
   private final String bucket;
   private final AmazonS3 s3client;
 
-  public S3Directory(String bucketName, String endpoint) {
-    bucket = bucketName;
-    s3client = AmazonS3ClientBuilder
-            .standard()
-            .withCredentials(AWSTools.credentialsProvider())
-            .build();
-    s3client.setEndpoint(endpoint);
+  public S3Directory(AmazonS3 s3client, String bucketName) {
+    this.bucket = bucketName;
+    this.s3client = s3client;
     if (!s3client.doesBucketExistV2(bucketName)) {
       s3client.createBucket(bucketName);
     }
