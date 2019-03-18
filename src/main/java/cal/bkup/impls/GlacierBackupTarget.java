@@ -71,7 +71,7 @@ public class GlacierBackupTarget implements BackupTarget {
     client.createVault(req);
   }
 
-  private static final int UPLOAD_CHUNK_SIZE = 128 * 1024 * 1024; // 128 Mb
+  private static final int UPLOAD_CHUNK_SIZE = AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK;
 
   /**
    * Files whose sizes are smaller than this will be uploaded in one request
@@ -167,7 +167,7 @@ public class GlacierBackupTarget implements BackupTarget {
 
     long total = 0;
     int n;
-    while ((n = readChunk(data, chunk)) > 0) {
+    while ((n = Util.readChunk(data, chunk)) > 0) {
       String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(chunk, 0, n));
       binaryChecksums.add(BinaryUtils.fromHex(checksum));
       UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
@@ -203,15 +203,6 @@ public class GlacierBackupTarget implements BackupTarget {
         return backupId;
       }
     };
-  }
-
-  private static int readChunk(InputStream in, byte[] chunk) throws IOException {
-    int soFar = 0;
-    int n;
-    while (soFar < chunk.length && (n = in.read(chunk, soFar, chunk.length - soFar)) >= 0) {
-      soFar += n;
-    }
-    return soFar;
   }
 
   private static final Path listLoc = Paths.get("/tmp/glacier-inventory");

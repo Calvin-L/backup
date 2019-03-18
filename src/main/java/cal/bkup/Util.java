@@ -246,4 +246,12 @@ public abstract class Util {
     }
   }
 
+  public static int readChunk(InputStream in, byte[] chunk) throws IOException {
+    int soFar = 0;
+    int n;
+    while (soFar < chunk.length && (n = in.read(chunk, soFar, chunk.length - soFar)) >= 0) {
+      soFar += n;
+    }
+    return soFar;
+  }
 }
