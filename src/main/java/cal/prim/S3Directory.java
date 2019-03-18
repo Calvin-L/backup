@@ -2,7 +2,7 @@ package cal.prim;
 
 import cal.bkup.AWSTools;
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.ObjectListing;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 
@@ -25,9 +25,12 @@ public class S3Directory implements SimpleDirectory {
 
   public S3Directory(String bucketName, String endpoint) {
     bucket = bucketName;
-    s3client = new AmazonS3Client(AWSTools.getCredentials());
+    s3client = AmazonS3ClientBuilder
+            .standard()
+            .withCredentials(AWSTools.credentialsProvider())
+            .build();
     s3client.setEndpoint(endpoint);
-    if (!s3client.doesBucketExist(bucketName)) {
+    if (!s3client.doesBucketExistV2(bucketName)) {
       s3client.createBucket(bucketName);
     }
 //    s3client.setBucketLifecycleConfiguration(
