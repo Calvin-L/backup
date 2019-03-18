@@ -17,6 +17,9 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * A {@link StringRegister} backed by Amazon's DynamoDB.
+ */
 public class DynamoDBStringRegister implements StringRegister {
 
   private final String PRIMARY_KEY_FIELD = "Id";
@@ -75,15 +78,15 @@ public class DynamoDBStringRegister implements StringRegister {
   }
 
   @Override
-  public void write(String previous, String next) throws IOException, PreconditionFailed {
+  public void write(String expectedValue, String newValue) throws IOException, PreconditionFailed {
     Item item = new Item()
             .withPrimaryKey(PRIMARY_KEY_FIELD, registerName)
-            .withString(VALUE_FIELD, next);
+            .withString(VALUE_FIELD, newValue);
     try {
       table.putItem(item,
-              previous == null ?
+              expectedValue == null ?
                       new Expected(VALUE_FIELD).notExist() :
-                      new Expected(VALUE_FIELD).eq(previous));
+                      new Expected(VALUE_FIELD).eq(expectedValue));
     } catch (ConditionalCheckFailedException e) {
       throw new PreconditionFailed(e);
     } catch (AmazonDynamoDBException e) {

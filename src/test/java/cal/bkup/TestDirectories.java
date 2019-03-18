@@ -2,7 +2,7 @@ package cal.bkup;
 
 import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.XZCompressedDirectory;
-import cal.bkup.types.SimpleDirectory;
+import cal.prim.SimpleDirectory;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 

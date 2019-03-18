@@ -1,6 +1,6 @@
 package cal.bkup.impls;
 
-import cal.bkup.types.SimpleDirectory;
+import cal.prim.SimpleDirectory;
 import org.tukaani.xz.LZMA2Options;
 import org.tukaani.xz.XZInputStream;
 import org.tukaani.xz.XZOutputStream;

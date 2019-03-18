@@ -1,7 +1,7 @@
 package cal.bkup.impls;
 
 import cal.bkup.Util;
-import cal.bkup.types.SimpleDirectory;
+import cal.prim.SimpleDirectory;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;

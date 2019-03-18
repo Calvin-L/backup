@@ -1,6 +1,6 @@
 package cal.bkup.impls;
 
-import cal.bkup.types.SimpleDirectory;
+import cal.prim.SimpleDirectory;
 import org.crashsafeio.AtomicDurableOutputStream;
 
 import java.io.BufferedOutputStream;

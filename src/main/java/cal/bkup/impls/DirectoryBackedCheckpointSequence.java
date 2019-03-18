@@ -1,7 +1,7 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.CheckpointSequence;
-import cal.bkup.types.SimpleDirectory;
+import cal.prim.SimpleDirectory;
 
 import java.io.IOException;
 import java.io.InputStream;

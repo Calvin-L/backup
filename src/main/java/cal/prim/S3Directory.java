@@ -1,7 +1,6 @@
-package cal.bkup.impls;
+package cal.prim;
 
 import cal.bkup.AWSTools;
-import cal.bkup.types.SimpleDirectory;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.model.ObjectListing;

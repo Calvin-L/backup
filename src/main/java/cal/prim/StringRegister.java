@@ -2,9 +2,30 @@ package cal.prim;
 
 import java.io.IOException;
 
+/**
+ * A mutable String value.
+ */
 public interface StringRegister {
 
+  /**
+   * Read the register.
+   * @return the current value
+   * @throws IOException if the value could not be read (for instance, because reading the
+   *   value happens over a network)
+   */
   String read() throws IOException;
-  void write(String previous, String next) throws IOException, PreconditionFailed;
+
+  /**
+   * Atomically set the value to <code>newValue</code> if its value is currently
+   * <code>expectedValue</code> (compare-and-swap).
+   * @param expectedValue the expected value
+   * @param newValue the new value
+   * @throws IOException if the operation failed (for instance, because the value is stored
+   *    across the network on another computer).  Clients should treat this outcome as
+   *    <em>ambiguous</em>: the write may or may not have succeeded, and it may actually
+   *    complete successfully <em>after</em> the <code>write()</code> call returns.
+   * @throws PreconditionFailed if the current value does not equal <code>expectedValue</code>.
+   */
+  void write(String expectedValue, String newValue) throws IOException, PreconditionFailed;
 
 }
