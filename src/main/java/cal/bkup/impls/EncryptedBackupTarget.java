@@ -9,6 +9,8 @@ import cal.bkup.types.Op;
 import cal.bkup.types.Pair;
 import cal.bkup.types.Price;
 import cal.bkup.types.ResourceInfo;
+import cal.prim.transforms.DecryptedInputStream;
+import cal.prim.transforms.EncryptedInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;

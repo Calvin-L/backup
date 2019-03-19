@@ -1,7 +1,7 @@
 package cal.bkup;
 
-import cal.bkup.impls.DecryptedInputStream;
-import cal.bkup.impls.EncryptedInputStream;
+import cal.prim.transforms.DecryptedInputStream;
+import cal.prim.transforms.EncryptedInputStream;
 import cal.bkup.impls.EncryptedOutputStream;
 import com.amazonaws.util.StringInputStream;
 import es.vocali.util.AESCrypt;

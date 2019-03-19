@@ -1,6 +1,7 @@
 package cal.bkup.impls;
 
 import cal.prim.SimpleDirectory;
+import cal.prim.transforms.DecryptedInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;

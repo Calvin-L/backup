@@ -12,7 +12,7 @@ import java.io.PipedOutputStream;
 import java.security.GeneralSecurityException;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static cal.bkup.impls.EncryptedInputStream.AES_VERSION;
+import static cal.prim.transforms.EncryptedInputStream.AES_VERSION;
 
 public class EncryptedOutputStream extends FilterOutputStream {
 

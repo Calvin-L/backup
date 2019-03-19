@@ -11,7 +11,7 @@ import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.SqliteCheckpoint2;
-import cal.bkup.impls.StatisticsCollectingInputStream;
+import cal.prim.transforms.StatisticsCollectingInputStream;
 import cal.bkup.impls.XZCompressedDirectory;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
@@ -85,6 +85,8 @@ public class Main {
   private static final String GLACIER_ENDPOINT = "glacier." + AWS_REGION + ".amazonaws.com";
   private static final String S3_BUCKET = "backupindex";
   private static final String S3_ENDPOINT = "s3." + AWS_REGION + ".amazonaws.com";
+  private static final String DYNAMO_TABLE = "backupconsistency";
+  private static final String DYNAMO_REGISTER = "clock";
   private static final int BACKLOG_CAPACITY = 8;
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
   private static final String HOME = System.getProperty("user.home");
