@@ -254,4 +254,9 @@ public abstract class Util {
     }
     return soFar;
   }
+
+  public static void async(Runnable job) {
+    new Thread(job).start();
+  }
+
 }
