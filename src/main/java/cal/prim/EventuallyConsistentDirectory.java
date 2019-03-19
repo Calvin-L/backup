@@ -17,7 +17,7 @@ public interface EventuallyConsistentDirectory {
    * Create or overwrite an entry.
    * The new entry might not be immediately visible to {@link #list()} or {@link #open(String)}.
    * @param name the name of the entry
-   * @return an output stream to write to
+   * @param stream the data to write
    * @throws IOException if the stream cannot be opened
    */
   void createOrReplace(String name, InputStream stream) throws IOException;
