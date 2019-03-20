@@ -2,6 +2,7 @@ package cal.prim;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
+import com.amazonaws.SdkClientException;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
 import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
@@ -15,7 +16,6 @@ import com.amazonaws.services.s3.model.UploadPartResult;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -24,7 +24,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-public class S3Directory implements SimpleDirectory, EventuallyConsistentDirectory {
+public class S3Directory implements EventuallyConsistentDirectory {
 
   private final String bucket;
   private final AmazonS3 s3client;
@@ -46,7 +46,7 @@ public class S3Directory implements SimpleDirectory, EventuallyConsistentDirecto
   }
 
   @Override
-  public Stream<String> list() throws IOException {
+  public Stream<String> list() {
     return StreamSupport.stream(new Spliterator<String>() {
       ObjectListing listing = s3client.listObjects(bucket);
       Iterator<S3ObjectSummary> current = listing.getObjectSummaries().iterator();
@@ -126,51 +126,38 @@ public class S3Directory implements SimpleDirectory, EventuallyConsistentDirecto
 
   @Override
   public void createOrReplace(String name, InputStream stream) throws IOException {
-    byte[] buffer = new byte[AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK];
-    int n = Util.readChunk(stream, buffer);
-    if (n < buffer.length) {
-      ObjectMetadata metadata = new ObjectMetadata();
-      metadata.setContentLength(n);
-      metadata.setContentType("application/octet-stream");
-      s3client.putObject(bucket, name, new ByteArrayInputStream(buffer, 0, n), metadata);
-    } else {
-      doMultipartUpload(name, buffer, stream);
+    try {
+      byte[] buffer = new byte[AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK];
+      int n = Util.readChunk(stream, buffer);
+      if (n < buffer.length) {
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(n);
+        metadata.setContentType("application/octet-stream");
+        s3client.putObject(bucket, name, new ByteArrayInputStream(buffer, 0, n), metadata);
+      } else {
+        doMultipartUpload(name, buffer, stream);
+      }
+    } catch (SdkClientException e) {
+      throw new IOException(e);
     }
   }
 
   @Override
-  public OutputStream createOrReplace(String name) throws IOException {
-//    // TODO: this operation is NOT consistent with open()
-//    // New object creation works as expected, but object overwrites in S3
-//    // are eventually consistent.  That means calling open() on the same
-//    // name after invoking this method may give back stale data.  :(
-//
-//    // I'd like to stream directly to S3, but unfortunately the API requires that it
-//    // know the exact size of the data being uploaded, which might not be possible
-//    // for compressed streams and the like.
-//    Path tmp = Files.createTempFile("s3upload", "");
-//    return new FileOutputStream(tmp.toAbsolutePath().toString()) {
-//      @Override
-//      public void close() throws IOException {
-//        super.close();
-//        try {
-//          s3client.putObject(bucket, name, tmp.toFile());
-//        } finally {
-//          Files.deleteIfExists(tmp);
-//        }
-//      }
-//    };
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
   public InputStream open(String name) throws IOException {
-    return s3client.getObject(bucket, name).getObjectContent();
+    try {
+      return s3client.getObject(bucket, name).getObjectContent();
+    } catch (SdkClientException e) {
+      throw new IOException(e);
+    }
   }
 
   @Override
   public void delete(String name) throws IOException {
-    s3client.deleteObject(bucket, name);
+    try {
+      s3client.deleteObject(bucket, name);
+    } catch (SdkClientException e) {
+      throw new IOException(e);
+    }
   }
 
 }

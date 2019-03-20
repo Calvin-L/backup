@@ -1,11 +1,10 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.CheckpointSequence;
-import cal.prim.SimpleDirectory;
+import cal.prim.EventuallyConsistentDirectory;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.OptionalLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -15,9 +14,9 @@ public class DirectoryBackedCheckpointSequence implements CheckpointSequence {
   private static final String EXTENSION = ".backupdb";
   private static final Pattern PATTERN = Pattern.compile("^(\\d+)" + Pattern.quote(EXTENSION) + "$");
 
-  private final SimpleDirectory location;
+  private final EventuallyConsistentDirectory location;
 
-  public DirectoryBackedCheckpointSequence(SimpleDirectory location) {
+  public DirectoryBackedCheckpointSequence(EventuallyConsistentDirectory location) {
     this.location = location;
   }
 
@@ -50,7 +49,7 @@ public class DirectoryBackedCheckpointSequence implements CheckpointSequence {
   }
 
   @Override
-  public OutputStream write(long checkpointNumber) throws IOException {
+  public void write(long checkpointNumber, InputStream data) throws IOException {
     String name = sequenceNumberToName(checkpointNumber);
     OptionalLong doublecheck = parseNameAsSequenceNumber(name);
     assert doublecheck.isPresent();
@@ -59,6 +58,6 @@ public class DirectoryBackedCheckpointSequence implements CheckpointSequence {
     if (oldMax.isPresent() && checkpointNumber <= oldMax.getAsLong()) {
       throw new IllegalArgumentException("new checkpoint number " + checkpointNumber + " is smaller than old checkpoint number " + oldMax.getAsLong());
     }
-    return location.createOrReplace(name);
+    location.createOrReplace(name, data);
   }
 }

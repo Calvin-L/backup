@@ -1,6 +1,7 @@
 package cal.bkup.impls;
 
-import cal.prim.SimpleDirectory;
+import cal.bkup.Util;
+import cal.prim.EventuallyConsistentDirectory;
 import org.crashsafeio.AtomicDurableOutputStream;
 
 import java.io.BufferedOutputStream;
@@ -13,7 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.stream.Stream;
 
-public class LocalDirectory implements SimpleDirectory {
+public class LocalDirectory implements EventuallyConsistentDirectory {
 
   public static final LocalDirectory TMP = new LocalDirectory(Paths.get("/tmp"));
 
@@ -29,13 +30,20 @@ public class LocalDirectory implements SimpleDirectory {
   }
 
   @Override
-  public OutputStream createOrReplace(String name) throws IOException {
-    return new BufferedOutputStream(new AtomicDurableOutputStream(dir.resolve(name)));
+  public void createOrReplace(String name, InputStream data) throws IOException {
+    try (OutputStream out = new BufferedOutputStream(new AtomicDurableOutputStream(dir.resolve(name)))) {
+      Util.copyStream(data, out);
+    }
   }
 
   @Override
   public InputStream open(String name) throws IOException {
     return new FileInputStream(dir.resolve(name).toString());
+  }
+
+  @Override
+  public void delete(String name) throws IOException {
+    Files.delete(dir.resolve(name));
   }
 
 }

@@ -1,9 +1,8 @@
 package cal.bkup;
 
-import cal.bkup.impls.CachedDirectory;
+import cal.prim.transforms.CachedDirectory;
 import cal.bkup.impls.DirectoryBackedCheckpointSequence;
 import cal.bkup.impls.EncryptedBackupTarget;
-import cal.bkup.impls.EncryptedDirectory;
 import cal.bkup.impls.FilesystemBackupTarget;
 import cal.bkup.impls.FreeOp;
 import cal.bkup.impls.GlacierBackupTarget;
@@ -11,8 +10,6 @@ import cal.bkup.impls.LocalDirectory;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.SqliteCheckpoint2;
-import cal.prim.transforms.StatisticsCollectingInputStream;
-import cal.bkup.impls.XZCompressedDirectory;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
@@ -28,8 +25,12 @@ import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Rule;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SymLink;
+import cal.prim.EventuallyConsistentDirectory;
 import cal.prim.S3Directory;
-import cal.prim.SimpleDirectory;
+import cal.prim.transforms.Encryption;
+import cal.prim.transforms.StatisticsCollectingInputStream;
+import cal.prim.transforms.TransformedDirectory;
+import cal.prim.transforms.XZCompression;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.cli.CommandLine;
@@ -45,7 +46,6 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -276,11 +276,11 @@ public class Main {
                       Instant lastSave = lastSaveRef.get();
                       synchronized (checkpoint) {
                         if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
-                          try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+                          checkpointHistory.write(now.toEpochMilli(), Util.createInputStream(out -> {
                             System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
                             checkpoint.save(out);
                             System.out.println("Checkpointed!");
-                          }
+                          }));
                           lastSaveRef.set(now);
                         }
                       }
@@ -299,11 +299,11 @@ public class Main {
             System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
             if (backup) {
               Instant now = Instant.now();
-              try (OutputStream out = checkpointHistory.write(now.toEpochMilli())) {
+              checkpointHistory.write(now.toEpochMilli(), Util.createInputStream(out -> {
                 System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
                 checkpoint.save(out);
                 System.out.println("Checkpointed!");
-              }
+              }));
             }
           }
         } else {
@@ -576,19 +576,19 @@ public class Main {
     return ops.stream().filter(Objects::nonNull);
   }
 
-  private static SimpleDirectory checkpointDir(String password, boolean local) {
+  private static EventuallyConsistentDirectory checkpointDir(String password, boolean local) throws IOException {
     Path cacheLoc = Paths.get("/tmp/s3cache");
-    SimpleDirectory rawDir = local ?
+    EventuallyConsistentDirectory rawDir = local ?
         LocalDirectory.TMP :
         new CachedDirectory(new S3Directory(AmazonS3ClientBuilder
                         .standard()
                         .withCredentials(AWSTools.credentialsProvider())
                         .withRegion(AWS_REGION)
                         .build(), S3_BUCKET), cacheLoc);
-    return new XZCompressedDirectory(new EncryptedDirectory(rawDir, password));
+    return new TransformedDirectory(rawDir, new XZCompression(), new Encryption(password));
   }
 
-  private static CheckpointSequence checkpoints(String password, boolean local) {
+  private static CheckpointSequence checkpoints(String password, boolean local) throws IOException {
     return new DirectoryBackedCheckpointSequence(checkpointDir(password, local));
   }
 

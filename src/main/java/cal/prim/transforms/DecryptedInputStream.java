@@ -52,7 +52,7 @@ public class DecryptedInputStream extends FilterInputStream {
       }
       Throwable exn = fail.get();
       if (exn != null) {
-        throw new IOException("encryption failed", exn);
+        throw new IOException("decryption failed", exn);
       }
     } finally {
       super.close();
