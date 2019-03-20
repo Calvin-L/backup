@@ -16,6 +16,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
 public abstract class Util {
@@ -190,24 +191,44 @@ public abstract class Util {
     return sum;
   }
 
-  public static InputStream createInputStream(IOConsumer<OutputStream> writer) throws IOException {
+  public static InputStream createInputStream(IOConsumer<OutputStream> writer) {
     PipedInputStream in = new PipedInputStream(SUGGESTED_BUFFER_SIZE);
-    PipedOutputStream out = new PipedOutputStream(in);
+    CountDownLatch gate = new CountDownLatch(1);
     AtomicReference<Exception> err = new AtomicReference<>(null);
+
     Thread t = new Thread(() -> {
-      try {
+      try (PipedOutputStream out = new PipedOutputStream(in)) {
+        gate.countDown();
         writer.accept(out);
       } catch (Exception e) {
         err.set(e);
+      } finally {
+        // If an exception was thrown constructing the PipedOutputStream,
+        // then unblock the waiting parent thread.
+        while (gate.getCount() > 0) {
+          gate.countDown();
+        }
       }
     });
     t.start();
+
+    for (;;) {
+      try {
+        gate.await();
+        break;
+      } catch (InterruptedException ignored) {
+      }
+    }
 
     return new FilterInputStream(in) {
       @Override
       public void close() throws IOException {
         try {
-          t.interrupt();
+//          t.interrupt();
+          long dropped = Util.drain(this.in);
+          if (dropped > 0) {
+            System.err.println("Dropped " + dropped + " bytes");
+          }
           t.join();
           Exception e = err.get();
           if (e != null) {
@@ -220,6 +241,16 @@ public abstract class Util {
         }
       }
     };
+  }
+
+  private static long drain(InputStream in) throws IOException {
+    byte[] buf = MEM_BUFFER.get();
+    long count = 0;
+    int n;
+    while ((n = in.read(buf)) >= 0) {
+      count += n;
+    }
+    return count;
   }
 
   public static long maximum(long[] array) throws NoSuchElementException {
