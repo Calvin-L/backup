@@ -1,7 +1,8 @@
 package cal.bkup;
 
+import cal.prim.ConsistentBlob;
 import cal.prim.transforms.CachedDirectory;
-import cal.bkup.impls.DirectoryBackedCheckpointSequence;
+import cal.prim.TimestampedBlobInDirectory;
 import cal.bkup.impls.EncryptedBackupTarget;
 import cal.bkup.impls.FilesystemBackupTarget;
 import cal.bkup.impls.FreeOp;
@@ -14,7 +15,6 @@ import cal.bkup.types.BackupReport;
 import cal.bkup.types.BackupTarget;
 import cal.bkup.types.Checkpoint;
 import cal.bkup.types.CheckpointFormat;
-import cal.bkup.types.CheckpointSequence;
 import cal.bkup.types.Config;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
@@ -62,7 +62,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.OptionalLong;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -150,10 +149,11 @@ public class Main {
     AtomicBoolean success = new AtomicBoolean(true);
 
     if (password != null) {
-      CheckpointSequence checkpointHistory = checkpoints(password, local);
+      final ConsistentBlob checkpointStore = checkpointStore(password, local);
+      final AtomicReference<ConsistentBlob.Tag> token = new AtomicReference<>(checkpointStore.head());
 
       if (list) {
-        try (Checkpoint checkpoint = findMostRecentCheckpoint(checkpointHistory)) {
+        try (Checkpoint checkpoint = loadCheckpoint(checkpointStore, token.get())) {
           checkpoint.list().forEach(info -> {
             System.out.println("/" + info.system() + info.path() + " [" + info.target() + '|' + info.idAtTarget() + '|' + info.modTime() + ']');
           });
@@ -166,7 +166,7 @@ public class Main {
         }
       }
 
-      try (Checkpoint checkpoint = findMostRecentCheckpoint(checkpointHistory);
+      try (Checkpoint checkpoint = loadCheckpoint(checkpointStore, token.get());
            BackupTarget target = getBackupTarget(password, local)) {
 
         System.out.println("Planning...");
@@ -276,11 +276,11 @@ public class Main {
                       Instant lastSave = lastSaveRef.get();
                       synchronized (checkpoint) {
                         if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
-                          checkpointHistory.write(now.toEpochMilli(), Util.createInputStream(out -> {
+                          token.set(checkpointStore.write(token.get(), Util.createInputStream(out -> {
                             System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
                             checkpoint.save(out);
                             System.out.println("Checkpointed!");
-                          }));
+                          })));
                           lastSaveRef.set(now);
                         }
                       }
@@ -299,11 +299,11 @@ public class Main {
             System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
             if (backup) {
               Instant now = Instant.now();
-              checkpointHistory.write(now.toEpochMilli(), Util.createInputStream(out -> {
+              token.set(checkpointStore.write(token.get(), Util.createInputStream(out -> {
                 System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
                 checkpoint.save(out);
                 System.out.println("Checkpointed!");
-              }));
+              })));
             }
           }
         } else {
@@ -588,8 +588,8 @@ public class Main {
     return new TransformedDirectory(rawDir, new XZCompression(), new Encryption(password));
   }
 
-  private static CheckpointSequence checkpoints(String password, boolean local) throws IOException {
-    return new DirectoryBackedCheckpointSequence(checkpointDir(password, local));
+  private static ConsistentBlob checkpointStore(String password, boolean local) throws IOException {
+    return new TimestampedBlobInDirectory(checkpointDir(password, local));
   }
 
   /**
@@ -601,29 +601,24 @@ public class Main {
           SqliteCheckpoint.FORMAT,
   };
 
-  private static Checkpoint findMostRecentCheckpoint(CheckpointSequence entries) throws IOException {
+  private static Checkpoint loadCheckpoint(ConsistentBlob store, ConsistentBlob.Tag token) throws IOException {
     System.out.println("Fetching checkpoint...");
-    OptionalLong mostRecentID = entries.mostRecentCheckpointID();
-    if (!mostRecentID.isPresent()) {
-      return FORMATS[0].createEmpty();
-    }
-    long id = mostRecentID.getAsLong();
     for (CheckpointFormat format : FORMATS) {
       Checkpoint result;
-      try (InputStream in = entries.read(id)) {
+      try (InputStream in = store.read(token)) {
         result = format.tryRead(in);
       } catch (IncorrectFormatException e) {
         System.out.println("Does not match format " + format.name() + ": " + e.getMessage());
         continue;
       }
-      System.out.println("Loaded checkpoint " + id + " (format=" + format.name() + ')');
+      System.out.println("Loaded checkpoint " + token + " (format=" + format.name() + ')');
       if (format != FORMATS[0]) {
         System.out.println("Migrating from " + format.name() + " to " + FORMATS[0].name());
         return FORMATS[0].migrateFrom(result);
       }
       return result;
     }
-    throw new IOException("Checkpoint " + id + " does not match any known format");
+    throw new IOException("Checkpoint " + token + " does not match any known format");
   }
 
   private static BackupTarget getBackupTarget(String password, boolean local) throws GeneralSecurityException, UnsupportedEncodingException {

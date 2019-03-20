@@ -49,6 +49,6 @@ public interface ConsistentBlob {
    * Some implementations require this to be called periodically to clean up old data.
    * @throws IOException if something goes wrong
    */
-  void cleanup() throws IOException;
+  default void cleanup() throws IOException { }
 
 }
