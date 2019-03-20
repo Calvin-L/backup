@@ -1,7 +1,6 @@
-package cal.bkup.impls;
+package cal.prim;
 
 import cal.bkup.Util;
-import cal.prim.EventuallyConsistentDirectory;
 import org.crashsafeio.AtomicDurableOutputStream;
 
 import java.io.BufferedOutputStream;

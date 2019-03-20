@@ -7,7 +7,7 @@ import cal.bkup.impls.EncryptedBackupTarget;
 import cal.bkup.impls.FilesystemBackupTarget;
 import cal.bkup.impls.FreeOp;
 import cal.bkup.impls.GlacierBackupTarget;
-import cal.bkup.impls.LocalDirectory;
+import cal.prim.LocalDirectory;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.SqliteCheckpoint;
 import cal.bkup.impls.SqliteCheckpoint2;
