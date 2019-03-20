@@ -1,6 +1,7 @@
 package cal.bkup;
 
 import cal.prim.EventuallyConsistentDirectory;
+import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.TransformedDirectory;
 import cal.prim.transforms.XZCompression;
 import org.testng.Assert;
@@ -82,9 +83,30 @@ public class TestDirectories {
     check(new TransformedDirectory(new InMemoryDir(), new XZCompression(), new cal.prim.transforms.Encryption(Encryption.password)));
   }
 
-//  @Test
-//  public void testEncryptXZ() throws Exception {
-//    check(new EncryptedDirectory(new XZCompressedDirectory(new InMemoryDir()), Encryption.password));
-//  }
+  @Test
+  public void testTransformOrder() throws Exception {
+    EventuallyConsistentDirectory coreDir = new InMemoryDir();
+    BlobTransformer compression = new XZCompression();
+    BlobTransformer encryption = new cal.prim.transforms.Encryption(Encryption.password);
+    EventuallyConsistentDirectory view = new TransformedDirectory(coreDir, compression, encryption);
+    byte[] originalBytes = "hello, world".getBytes(CHARSET);
+    view.createOrReplace("foo", new ByteArrayInputStream(originalBytes));
+    byte[] rawBytes = Util.read(coreDir.open("foo"));
+
+    // The raw bytes can be decrypted...
+    byte[] decryptedBytes;
+    try (InputStream in = encryption.unApply(new ByteArrayInputStream(rawBytes))) {
+      decryptedBytes = Util.read(in);
+    }
+
+    // ...and then decompressed...
+    byte[] decompressedBytes;
+    try (InputStream in = compression.unApply(new ByteArrayInputStream(decryptedBytes))) {
+      decompressedBytes = Util.read(in);
+    }
+
+    // ...to obtain the original data.
+    Assert.assertEquals(decompressedBytes, originalBytes);
+  }
 
 }

@@ -37,10 +37,8 @@ public class TransformedDirectory implements EventuallyConsistentDirectory {
 
   @Override
   public void createOrReplace(String name, InputStream stream) throws IOException {
-    // Apply transformations in reverse order so that transforms[0] is the FIRST
-    // one applied to the incoming bytes.
-    for (int i = transforms.length - 1; i >= 0; --i) {
-      stream = transforms[i].apply(stream);
+    for (BlobTransformer t : transforms) {
+      stream = t.apply(stream);
     }
     directory.createOrReplace(name, stream);
   }
@@ -48,8 +46,9 @@ public class TransformedDirectory implements EventuallyConsistentDirectory {
   @Override
   public InputStream open(String name) throws IOException {
     InputStream result = directory.open(name);
-    for (BlobTransformer t : transforms) {
-      result = t.unApply(result);
+    // reverse order to undo what happened in createOrReplace
+    for (int i = transforms.length - 1; i >= 0; --i) {
+      result = transforms[i].unApply(result);
     }
     return result;
   }
