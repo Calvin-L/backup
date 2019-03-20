@@ -2,7 +2,6 @@ package cal.bkup;
 
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.EncryptedInputStream;
-import cal.bkup.impls.EncryptedOutputStream;
 import com.amazonaws.util.StringInputStream;
 import es.vocali.util.AESCrypt;
 import org.testng.Assert;
@@ -13,7 +12,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
 import java.util.Random;
@@ -27,16 +25,14 @@ public class Encryption {
   static void convertAndDeconvert(
       String text,
       Function<InputStream, InputStream> inProvider,
-      Function<OutputStream, OutputStream> outProvider) throws IOException {
+      Function<InputStream, InputStream> outProvider) throws IOException {
 
     byte[] inBytes = text.getBytes();
 
     byte[] bytes;
-    ByteArrayOutputStream s = new ByteArrayOutputStream();
-    try (OutputStream out = outProvider.apply(s)) {
-      Util.copyStream(new ByteArrayInputStream(inBytes), out);
+    try (InputStream in = outProvider.apply(new ByteArrayInputStream(inBytes))) {
+      bytes = Util.read(in);
     }
-    bytes = s.toByteArray();
 
     System.out.println("intermediate: " + Arrays.toString(bytes));
 
@@ -61,8 +57,8 @@ public class Encryption {
         },
         (s) -> {
           try {
-            return new EncryptedOutputStream(s, password);
-          } catch (IOException e) {
+            return new EncryptedInputStream(s, password);
+          } catch (IOException | GeneralSecurityException e) {
             throw new RuntimeException(e);
           }
         });

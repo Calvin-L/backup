@@ -1,9 +1,7 @@
 package cal.bkup;
 
 import org.testng.annotations.Test;
-import org.tukaani.xz.LZMA2Options;
 import org.tukaani.xz.XZInputStream;
-import org.tukaani.xz.XZOutputStream;
 
 import java.io.IOException;
 
@@ -23,7 +21,7 @@ public class XZCompression {
         },
         (s) -> {
           try {
-            return new XZOutputStream(s, new LZMA2Options());
+            return new cal.prim.transforms.XZCompression().apply(s);
           } catch (IOException e) {
             throw new RuntimeException(e);
           }
