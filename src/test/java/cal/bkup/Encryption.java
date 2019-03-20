@@ -12,7 +12,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.security.GeneralSecurityException;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.function.Function;
@@ -48,20 +47,8 @@ public class Encryption {
 
   private void check(String text) throws IOException {
     convertAndDeconvert(text,
-        (s) -> {
-          try {
-            return new DecryptedInputStream(s, password);
-          } catch (IOException | GeneralSecurityException e) {
-            throw new RuntimeException(e);
-          }
-        },
-        (s) -> {
-          try {
-            return new EncryptedInputStream(s, password);
-          } catch (IOException | GeneralSecurityException e) {
-            throw new RuntimeException(e);
-          }
-        });
+        (s) -> new DecryptedInputStream(s, password),
+        (s) -> new EncryptedInputStream(s, password));
   }
 
   @Test

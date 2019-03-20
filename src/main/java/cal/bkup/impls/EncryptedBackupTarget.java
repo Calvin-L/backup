@@ -14,7 +14,6 @@ import cal.prim.transforms.EncryptedInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.security.GeneralSecurityException;
 import java.util.Collection;
 import java.util.stream.Stream;
 
@@ -34,11 +33,7 @@ public class EncryptedBackupTarget implements BackupTarget {
 
   @Override
   public BackupReport backup(InputStream data, long estimatedByteCount) throws IOException {
-    try {
-      return backupTarget.backup(new EncryptedInputStream(data, password), estimatedByteCount);
-    } catch (GeneralSecurityException e) {
-      throw new IOException(e);
-    }
+    return backupTarget.backup(new EncryptedInputStream(data, password), estimatedByteCount);
   }
 
   /**
@@ -79,11 +74,7 @@ public class EncryptedBackupTarget implements BackupTarget {
   @Override
   public Op<Void> fetch(Collection<ResourceInfo> infos, IOConsumer<Pair<ResourceInfo, InputStream>> callback) throws IOException {
     return backupTarget.fetch(infos, res -> {
-      try {
-        callback.accept(new Pair<>(res.fst, new DecryptedInputStream(res.snd, password)));
-      } catch (GeneralSecurityException e) {
-        throw new IOException(e);
-      }
+      callback.accept(new Pair<>(res.fst, new DecryptedInputStream(res.snd, password)));
     });
   }
 }

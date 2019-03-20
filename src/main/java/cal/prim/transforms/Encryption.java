@@ -1,8 +1,6 @@
 package cal.prim.transforms;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.security.GeneralSecurityException;
 
 public class Encryption implements BlobTransformer {
 
@@ -13,21 +11,13 @@ public class Encryption implements BlobTransformer {
   }
 
   @Override
-  public InputStream apply(InputStream data) throws IOException {
-    try {
-      return new EncryptedInputStream(data, key);
-    } catch (GeneralSecurityException e) {
-      throw new IOException(e);
-    }
+  public InputStream apply(InputStream data) {
+    return new EncryptedInputStream(data, key);
   }
 
   @Override
-  public InputStream unApply(InputStream data) throws IOException {
-    try {
-      return new DecryptedInputStream(data, key);
-    } catch (GeneralSecurityException e) {
-      throw new IOException(e);
-    }
+  public InputStream unApply(InputStream data) {
+    return new DecryptedInputStream(data, key);
   }
 
 }
