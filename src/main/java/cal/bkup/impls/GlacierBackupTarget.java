@@ -9,7 +9,7 @@ import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
 import cal.bkup.types.Pair;
-import cal.bkup.types.Price;
+import cal.prim.Price;
 import cal.bkup.types.ResourceInfo;
 import com.amazonaws.services.glacier.AmazonGlacier;
 import com.amazonaws.services.glacier.AmazonGlacierClient;

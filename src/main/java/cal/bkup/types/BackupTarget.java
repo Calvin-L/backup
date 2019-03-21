@@ -1,5 +1,7 @@
 package cal.bkup.types;
 
+import cal.prim.Price;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;

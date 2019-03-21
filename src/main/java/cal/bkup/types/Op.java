@@ -1,6 +1,7 @@
 package cal.bkup.types;
 
 import cal.bkup.impls.ProgressDisplay;
+import cal.prim.Price;
 
 import java.io.IOException;
 

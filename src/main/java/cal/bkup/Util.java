@@ -1,7 +1,7 @@
 package cal.bkup;
 
 import cal.bkup.types.IOConsumer;
-import cal.bkup.types.Price;
+import cal.prim.Price;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Console;

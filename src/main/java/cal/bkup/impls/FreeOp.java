@@ -1,7 +1,7 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.Op;
-import cal.bkup.types.Price;
+import cal.prim.Price;
 
 public abstract class FreeOp<T> implements Op<T> {
   @Override

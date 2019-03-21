@@ -20,7 +20,7 @@ import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.IncorrectFormatException;
 import cal.bkup.types.Op;
-import cal.bkup.types.Price;
+import cal.prim.Price;
 import cal.bkup.types.ResourceInfo;
 import cal.bkup.types.Rule;
 import cal.bkup.types.Sha256AndSize;

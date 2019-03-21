@@ -1,4 +1,4 @@
-package cal.bkup.types;
+package cal.prim;
 
 import org.apache.commons.math3.fraction.BigFraction;
 
