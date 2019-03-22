@@ -122,7 +122,9 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
       asyncDelete(name);
       throw e;
     }
-    asyncDelete(expectedId);
+    // It's technically safe to delete the old entry, but *just*in*case*
+    // let's keep it around.  It will get clobbered by cleanup() later.
+    // asyncDelete(expectedId);
     return new MyTag(name);
   }
 
