@@ -33,7 +33,7 @@ public class ProgressDisplay implements AutoCloseable {
     tasks = new ArrayList<>();
     this.totalTasks = totalTasks;
     totalComplete = 0L;
-    refreshDisplay = new RateLimitedRunnable(Duration.ofMinutes(1), () -> {
+    refreshDisplay = new RateLimitedRunnable(Duration.ofMinutes(1), RateLimitedRunnable.Mode.RUN_ON_FIRST_CALL, () -> {
       for (Task t : tasks) {
         printTask(t);
       }

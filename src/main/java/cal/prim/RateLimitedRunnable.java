@@ -7,13 +7,18 @@ import java.time.Instant;
 
 public class RateLimitedRunnable implements Runnable {
 
+  public enum Mode {
+    RUN_ON_FIRST_CALL,
+    DELAY_FIRST_RUN
+  }
+
   private final Duration rateLimit;
   private Instant lastRun;
   private final Runnable wrapped;
 
-  public RateLimitedRunnable(Duration rateLimit, Runnable wrapped) {
+  public RateLimitedRunnable(Duration rateLimit, Mode mode, Runnable wrapped) {
     this.rateLimit = rateLimit;
-    this.lastRun = null;
+    this.lastRun = mode.equals(Mode.DELAY_FIRST_RUN) ? Instant.now() : null;
     this.wrapped = wrapped;
   }
 
