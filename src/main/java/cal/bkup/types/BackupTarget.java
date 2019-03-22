@@ -1,5 +1,6 @@
 package cal.bkup.types;
 
+import cal.prim.Pair;
 import cal.prim.Price;
 
 import java.io.IOException;

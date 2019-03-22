@@ -6,7 +6,7 @@ import cal.bkup.types.BackupTarget;
 import cal.bkup.types.IOConsumer;
 import cal.bkup.types.Id;
 import cal.bkup.types.Op;
-import cal.bkup.types.Pair;
+import cal.prim.Pair;
 import cal.prim.Price;
 import cal.bkup.types.ResourceInfo;
 import cal.prim.transforms.DecryptedInputStream;

@@ -1,4 +1,4 @@
-package cal.bkup.types;
+package cal.prim;
 
 public final class Pair<A, B> {
   public final A fst;
