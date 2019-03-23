@@ -495,17 +495,7 @@ public class Main {
                 byte[] finalSha256 = stream.getSha256Digest();
                 long finalSize = stream.getBytesRead();
 
-                checkpoint.noteSuccessfulBackup(target.name(), resource, new Sha256AndSize() {
-                  @Override
-                  public byte[] sha256() {
-                    return finalSha256;
-                  }
-
-                  @Override
-                  public long size() {
-                    return finalSize;
-                  }
-                }, report);
+                checkpoint.noteSuccessfulBackup(target.name(), resource, new Sha256AndSize(finalSha256, finalSize), report);
                 return null;
               }
 

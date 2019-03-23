@@ -336,17 +336,7 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
 
             @Override
             public Sha256AndSize trueSummary() {
-              return new Sha256AndSize() {
-                @Override
-                public byte[] sha256() {
-                  return Util.stringToSha256(sha);
-                }
-
-                @Override
-                public long size() {
-                  return size;
-                }
-              };
+              return new Sha256AndSize(Util.stringToSha256(sha), size);
             }
           });
         }
