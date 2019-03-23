@@ -14,9 +14,9 @@ public class EncryptedInputStream extends FilterInputStream {
 
   public EncryptedInputStream(InputStream wrappedStream, String password) {
     super(Util.createInputStream(out -> {
-      try {
+      try (InputStream copy = wrappedStream /* ensure wrappedStream is closed */) {
         AESCrypt crypt = new AESCrypt(password);
-        crypt.encrypt(AES_VERSION, wrappedStream, out);
+        crypt.encrypt(AES_VERSION, copy, out);
       } catch (GeneralSecurityException e) {
         throw new IOException(e);
       }

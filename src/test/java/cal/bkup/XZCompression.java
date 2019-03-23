@@ -19,13 +19,7 @@ public class XZCompression {
             throw new RuntimeException(e);
           }
         },
-        (s) -> {
-          try {
-            return new cal.prim.transforms.XZCompression().apply(s);
-          } catch (IOException e) {
-            throw new RuntimeException(e);
-          }
-        });
+        (s) -> new cal.prim.transforms.XZCompression().apply(s));
   }
 
   @Test

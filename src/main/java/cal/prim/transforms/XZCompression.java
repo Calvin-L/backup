@@ -14,10 +14,11 @@ public class XZCompression implements BlobTransformer {
   private final LZMA2Options options = new LZMA2Options();
 
   @Override
-  public InputStream apply(InputStream data) throws IOException {
+  public InputStream apply(InputStream data) {
     return Util.createInputStream(os -> {
-      try (OutputStream out = new XZOutputStream(os, options)) {
-        Util.copyStream(data, out);
+      try (OutputStream out = new XZOutputStream(os, options);
+           InputStream copy = data /* ensure data gets closed */) {
+        Util.copyStream(copy, out);
       }
     });
   }
