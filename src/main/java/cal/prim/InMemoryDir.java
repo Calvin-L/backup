@@ -5,7 +5,6 @@ import cal.bkup.Util;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -21,7 +20,7 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
   @Override
   public void createOrReplace(String name, InputStream s) throws IOException {
     byte[] bytes = Util.read(s);
-    System.out.println("dir[" + name + "] = " + Arrays.toString(bytes));
+    System.out.println("set dir[" + name + "] (size=" + bytes.length + ')');
     data.put(name, bytes);
   }
 
