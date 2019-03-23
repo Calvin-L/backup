@@ -3,7 +3,7 @@ package cal.prim;
 import java.io.IOException;
 
 /**
- * A mutable String value.
+ * A mutable String value.  The value is initially empty and is never null.
  */
 public interface StringRegister {
 
@@ -20,6 +20,7 @@ public interface StringRegister {
    * <code>expectedValue</code> (compare-and-swap).
    * @param expectedValue the expected value
    * @param newValue the new value
+   * @throws NullPointerException if <code>newValue</code> is null
    * @throws IOException if the operation failed (for instance, because the value is stored
    *    across the network on another computer).  Clients should treat this outcome as
    *    <em>ambiguous</em>: the write may or may not have succeeded, and it may actually

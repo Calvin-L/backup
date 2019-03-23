@@ -1,6 +1,7 @@
 package cal.bkup;
 
 import cal.prim.ConsistentBlob;
+import cal.prim.NoValue;
 import cal.prim.transforms.CachedDirectory;
 import cal.prim.TimestampedBlobInDirectory;
 import cal.bkup.impls.EncryptedBackupTarget;
@@ -610,6 +611,9 @@ public class Main {
       } catch (IncorrectFormatException e) {
         System.out.println("Does not match format " + format.name() + ": " + e.getMessage());
         continue;
+      } catch (NoValue noValue) {
+        System.out.println("No index was found; creating a new one");
+        return FORMATS[0].createEmpty();
       }
       System.out.println("Loaded checkpoint " + token + " (format=" + format.name() + ')');
       if (format != FORMATS[0]) {

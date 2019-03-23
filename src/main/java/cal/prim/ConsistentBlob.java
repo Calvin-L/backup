@@ -5,7 +5,8 @@ import java.io.InputStream;
 
 /**
  * A blob that allows for compare-and-swap.
- * This class is similar to {@link StringRegister}, but is designed for storing very large
+ *
+ * <p>This class is similar to {@link StringRegister}, but is designed for storing very large
  * amounts of data.  It would be impractical to pass the entire data set as the expected
  * value to <code>write()</code>, so instead this class utilizes <em>tags</em>.
  *
@@ -29,8 +30,9 @@ public interface ConsistentBlob {
    * @param entry a tag
    * @return a stream to read the entry
    * @throws IOException if something goes wrong
+   * @throws NoValue if no value has ever been written
    */
-  InputStream read(Tag entry) throws IOException;
+  InputStream read(Tag entry) throws IOException, NoValue;
 
   /**
    * Write a new value.

@@ -90,8 +90,12 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
   }
 
   @Override
-  public InputStream read(Tag entry) throws IOException {
-    return directory.open(upcast(entry).id);
+  public InputStream read(Tag entry) throws IOException, NoValue {
+    String id = upcast(entry).id;
+    if (associatedClockValue(id) == 0L) {
+      throw new NoValue();
+    }
+    return directory.open(id);
   }
 
   private void asyncDelete(String name) {
