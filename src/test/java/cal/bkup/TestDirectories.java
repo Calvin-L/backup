@@ -51,7 +51,7 @@ public class TestDirectories {
 
   @Test
   public void testXZEncrypt() throws Exception {
-    check(new TransformedDirectory(new InMemoryDir(), new XZCompression(), new cal.prim.transforms.Encryption(Encryption.password)));
+    check(new TransformedDirectory(new InMemoryDir(), new XZCompression().followedBy(new cal.prim.transforms.Encryption(Encryption.password))));
   }
 
   @Test
@@ -59,7 +59,7 @@ public class TestDirectories {
     EventuallyConsistentDirectory coreDir = new InMemoryDir();
     BlobTransformer compression = new XZCompression();
     BlobTransformer encryption = new cal.prim.transforms.Encryption(Encryption.password);
-    EventuallyConsistentDirectory view = new TransformedDirectory(coreDir, compression, encryption);
+    EventuallyConsistentDirectory view = new TransformedDirectory(coreDir, compression.followedBy(encryption));
     byte[] originalBytes = "hello, world".getBytes(CHARSET);
     view.createOrReplace("foo", new ByteArrayInputStream(originalBytes));
     byte[] rawBytes = Util.read(coreDir.open("foo"));

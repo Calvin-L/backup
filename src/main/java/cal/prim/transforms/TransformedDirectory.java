@@ -9,25 +9,18 @@ import java.util.stream.Stream;
 public class TransformedDirectory implements EventuallyConsistentDirectory {
 
   private final EventuallyConsistentDirectory directory;
-  private final BlobTransformer[] transforms;
+  private final BlobTransformer transform;
 
   /**
    * Apply the given transformations to data placed in the directory.
-   * The transformations are applied in order, so
-   * <pre>
-   *   new TransformedDirectory(dir, compress, encrypt)
-   * </pre>
-   * will produce a directory that stores the encrypted version of the
-   * compressed version of the data you put into it.
    *
    * @param directory the directory to wrap
-   * @param transforms the transformations to apply.  This class takes ownership of
-   *                   the array, so it should not be modified after construction.
+   * @param transform the transformation to apply
    * @return
    */
-  public TransformedDirectory(EventuallyConsistentDirectory directory, BlobTransformer... transforms) {
+  public TransformedDirectory(EventuallyConsistentDirectory directory, BlobTransformer transform) {
     this.directory = directory;
-    this.transforms = transforms;
+    this.transform = transform;
   }
 
   @Override
@@ -37,20 +30,12 @@ public class TransformedDirectory implements EventuallyConsistentDirectory {
 
   @Override
   public void createOrReplace(String name, InputStream stream) throws IOException {
-    for (BlobTransformer t : transforms) {
-      stream = t.apply(stream);
-    }
-    directory.createOrReplace(name, stream);
+    directory.createOrReplace(name, transform.apply(stream));
   }
 
   @Override
   public InputStream open(String name) throws IOException {
-    InputStream result = directory.open(name);
-    // reverse order to undo what happened in createOrReplace
-    for (int i = transforms.length - 1; i >= 0; --i) {
-      result = transforms[i].unApply(result);
-    }
-    return result;
+    return transform.unApply(directory.open(name));
   }
 
   @Override

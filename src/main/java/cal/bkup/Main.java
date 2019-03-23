@@ -576,7 +576,7 @@ public class Main {
                         .withCredentials(AWSTools.credentialsProvider())
                         .withRegion(AWS_REGION)
                         .build(), S3_BUCKET), cacheLoc);
-    return new TransformedDirectory(rawDir, new XZCompression(), new Encryption(password));
+    return new TransformedDirectory(rawDir, new XZCompression().followedBy(new Encryption(password)));
   }
 
   private static ConsistentBlob checkpointStore(String password, boolean local) throws IOException {
