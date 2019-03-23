@@ -99,6 +99,11 @@ public class SqliteCheckpoint2 implements Checkpoint, AutoCloseable {
             public long sizeEstimateInBytes() {
               throw new UnsupportedOperationException();
             }
+
+            @Override
+            public Object inode() {
+              throw new UnsupportedOperationException();
+            }
           }, trueSummary, new BackupReport() {
             @Override
             public Id idAtTarget() {
