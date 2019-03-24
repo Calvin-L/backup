@@ -20,10 +20,6 @@ public class ProgressDisplay implements AutoCloseable {
     }
   }
 
-  public interface ProgressCallback {
-    void reportProgress(long numerator, long denominator);
-  }
-
   private long totalComplete;
   private final long totalTasks;
   private final List<Task> tasks;
@@ -57,6 +53,10 @@ public class ProgressDisplay implements AutoCloseable {
     System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(task.progress, task.denominator) + "] " + task.description);
   }
 
+  private void printSkippedTask(String description) {
+    System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(1L, 1L) + "] skipped: " + description);
+  }
+
   public synchronized Task startTask(String description) {
     Task t = new Task(description);
     tasks.add(t);
@@ -84,6 +84,12 @@ public class ProgressDisplay implements AutoCloseable {
     tasks.remove(index);
     task.progress = task.denominator = 1L;
     printTask(task);
+  }
+
+  public synchronized void skipTask(String description) {
+    ++totalComplete;
+    printSkippedTask(description);
+    refreshDisplay.run();
   }
 
   @Override
