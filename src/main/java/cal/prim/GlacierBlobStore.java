@@ -144,8 +144,8 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
     UploadArchiveRequest req = new UploadArchiveRequest()
             .withVaultName(vaultName)
             .withChecksum(checksum)
-            .withContentLength((long)bytes.length)
-            .withBody(new ByteArrayInputStream(bytes));
+            .withContentLength((long)n)
+            .withBody(new ByteArrayInputStream(bytes, 0, n));
     UploadArchiveResult res = client.uploadArchive(req);
     String id = res.getArchiveId();
     return new PutResult() {
