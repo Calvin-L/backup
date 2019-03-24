@@ -2,6 +2,7 @@ package cal.prim;
 
 import cal.bkup.Util;
 import org.crashsafeio.AtomicDurableOutputStream;
+import org.crashsafeio.DurableIOUtil;
 
 import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
@@ -10,16 +11,14 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.stream.Stream;
 
 public class LocalDirectory implements EventuallyConsistentDirectory {
 
-  public static final LocalDirectory TMP = new LocalDirectory(Paths.get("/tmp"));
-
   private final Path dir;
 
-  public LocalDirectory(Path dir) {
+  public LocalDirectory(Path dir) throws IOException {
+    DurableIOUtil.createFolders(dir);
     this.dir = dir;
   }
 

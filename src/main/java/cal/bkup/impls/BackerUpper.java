@@ -89,16 +89,24 @@ public class BackerUpper {
           }
 
           while (symLinkIterator.hasNext()) {
-            if (true) throw new UnsupportedOperationException("no symlink support yet");
             SymLink link = symLinkIterator.next();
             inThisBackup.add(link.src());
+            BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
+            if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && latest.linkTarget.equals(link.dst())) {
+              continue;
+            }
+            System.out.println("Adding symlink " + link.src() + " --> " + link.dst());
             index.appendRevision(whatSystemIsThis, link.src(), link);
           }
 
           while (hardLinkIterator.hasNext()) {
-            if (true) throw new UnsupportedOperationException("no hardlink support yet");
             HardLink link = hardLinkIterator.next();
             inThisBackup.add(link.src());
+            BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
+            if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && latest.linkTarget.equals(link.dst())) {
+              continue;
+            }
+            System.out.println("Adding hard link " + link.src() + " --> " + link.dst());
             index.appendRevision(whatSystemIsThis, link.src(), link);
           }
 
@@ -185,6 +193,7 @@ public class BackerUpper {
 
     // (2) Checksum the path.
     Sha256AndSize summary;
+    System.out.println("Computing checksum of " + f.path() + "...");
     try (InputStream in = Util.buffered(f.open())) {
       summary = Util.summarize(in, stream -> { });
     }
@@ -194,6 +203,7 @@ public class BackerUpper {
 
     // (4) Not known?  Upload it!
     if (report == null) {
+      System.out.println("Uploading " + f.path() + " (" + summary.size() + " bytes)...");
       String key = Util.randomPassword();
       Consumer<StatisticsCollectingInputStream> reportProgress = s -> {
       };
@@ -205,6 +215,7 @@ public class BackerUpper {
         identifier = new Id(result.identifier());
         sizeAtTarget = result.bytesStored();
       }
+      System.out.println(" *** uploaded as " + identifier + " (" + sizeAtTarget + " bytes)");
       assert in.isClosed();
       long size = in.getBytesRead();
       byte[] sha256 = in.getSha256Digest();
@@ -221,9 +232,12 @@ public class BackerUpper {
       };
       summary = new Sha256AndSize(sha256, size);
       index.addBackedUpBlob(summary, key, report);
+    } else {
+      System.out.println(" *** new upload is not necessary");
     }
 
     // Record the latest details.
+    System.out.println("Adding regular file " + f.path());
     index.appendRevision(systemId, f.path(), modTime, summary);
   }
 
@@ -247,6 +261,7 @@ public class BackerUpper {
   }
 
   private void saveIndex(String password) throws IOException, PreconditionFailed {
+    System.out.println("Saving index...");
     try (InputStream bytes = transformer.followedBy(new Encryption(password)).apply(indexFormat.serialize(index))) {
       tagForLastIndexLoad = indexStore.write(tagForLastIndexLoad, bytes);
     }

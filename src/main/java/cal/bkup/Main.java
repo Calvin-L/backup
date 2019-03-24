@@ -1,37 +1,30 @@
 package cal.bkup;
 
-import cal.prim.ConsistentBlob;
-import cal.prim.NoValue;
-import cal.prim.transforms.CachedDirectory;
-import cal.prim.TimestampedBlobInDirectory;
-import cal.bkup.impls.EncryptedBackupTarget;
-import cal.bkup.impls.FilesystemBackupTarget;
-import cal.bkup.impls.FreeOp;
-import cal.bkup.impls.GlacierBackupTarget;
-import cal.prim.LocalDirectory;
-import cal.bkup.impls.ProgressDisplay;
-import cal.bkup.impls.SqliteCheckpoint;
-import cal.bkup.impls.SqliteCheckpoint2;
-import cal.bkup.types.BackupReport;
-import cal.bkup.types.BackupTarget;
-import cal.bkup.types.Checkpoint;
-import cal.bkup.types.CheckpointFormat;
+import cal.bkup.impls.BackerUpper;
+import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.types.Config;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
-import cal.bkup.types.IncorrectFormatException;
-import cal.bkup.types.Op;
-import cal.prim.Price;
-import cal.bkup.types.ResourceInfo;
+import cal.bkup.types.IndexFormat;
+import cal.bkup.types.RegularFile;
 import cal.bkup.types.Rule;
-import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SymLink;
+import cal.prim.BlobStoreOnDirectory;
+import cal.prim.ConsistentBlob;
+import cal.prim.ConsistentBlobOnEventuallyConsistentDirectory;
+import cal.prim.DynamoDBStringRegister;
+import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.EventuallyConsistentDirectory;
+import cal.prim.GlacierBlobStore;
+import cal.prim.LocalDirectory;
 import cal.prim.S3Directory;
-import cal.prim.transforms.Encryption;
-import cal.prim.transforms.StatisticsCollectingInputStream;
-import cal.prim.transforms.TransformedDirectory;
+import cal.prim.SQLiteStringRegister;
+import cal.prim.StringRegister;
+import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.XZCompression;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
+import com.amazonaws.services.dynamodbv2.document.DynamoDB;
+import com.amazonaws.services.glacier.AmazonGlacierClientBuilder;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.cli.CommandLine;
@@ -41,42 +34,19 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
-import java.io.BufferedInputStream;
 import java.io.Console;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
 import java.nio.file.FileSystems;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.GeneralSecurityException;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.ConcurrentModificationException;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class Main {
 
@@ -136,7 +106,16 @@ public class Main {
     final boolean backup = cli.hasOption("backup");
     final boolean local = cli.hasOption("local");
     final int numToCheck = cli.hasOption('c') ? Integer.parseInt(cli.getOptionValue('c')) : 0;
+
+    if (!backup && !list && numToCheck == 0 && !gc) {
+      System.err.println("No action specified. Did you mean to pass '-b'?");
+      return;
+    }
+
     final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
+
+    // ------------------------------------------------------------------------------
+    // Set up actors and configuration
 
     final Config config;
     try {
@@ -147,176 +126,81 @@ public class Main {
       return;
     }
 
-    AtomicBoolean success = new AtomicBoolean(true);
+    final BlobTransformer transform = new XZCompression();
+    final IndexFormat indexFormat = new JsonIndexFormat();
+    final BackerUpper backupper;
 
-    if (password != null) {
-      final ConsistentBlob checkpointStore = checkpointStore(password, local);
-      final AtomicReference<ConsistentBlob.Tag> token = new AtomicReference<>(checkpointStore.head());
-
-      if (list) {
-        try (Checkpoint checkpoint = loadCheckpoint(checkpointStore, token.get())) {
-          checkpoint.list().forEach(info -> {
-            System.out.println("/" + info.system() + info.path() + " [" + info.target() + '|' + info.idAtTarget() + '|' + info.modTime() + ']');
-          });
-          checkpoint.symlinks(config.systemName()).forEach(link -> {
-            System.out.println("/" + link.src() + " [SOFT] ----> " + link.dst());
-          });
-          checkpoint.hardlinks(config.systemName()).forEach(link -> {
-            System.out.println("/" + link.src() + " [HARD] ----> " + link.dst());
-          });
-        }
-      }
-
-      try (Checkpoint checkpoint = loadCheckpoint(checkpointStore, token.get());
-           BackupTarget target = getBackupTarget(password, local)) {
-
-        System.out.println("Planning...");
-        List<Op<?>> plan = new ArrayList<>();
-        if (backup) {
-          plan.addAll(planBackup(config, checkpoint, target).collect(Collectors.toList()));
-        }
-        if (gc) {
-          // TODO: clean up checkpoints too
-          Set<Id> ids = checkpoint.list()
-              .filter(info -> info.target().equals(target.name()))
-              .map(ResourceInfo::idAtTarget)
-              .collect(Collectors.toSet());
-          target.list().forEach(x -> {
-            if (!ids.contains(x.idAtTarget())) {
-              try {
-                plan.add(target.delete(x));
-              } catch (IOException e) {
-                throw new RuntimeException(e);
-              }
-            }
-          });
-        }
-
-        if (numToCheck > 0) {
-          List<ResourceInfo> infos = checkpoint.list()
-              .filter(i -> i.system().equals(config.systemName()))
-              .filter(i -> {
-                    try {
-                      return Files.exists(i.path()) && Util.le(Files.getLastModifiedTime(i.path()).toInstant(), i.modTime());
-                    } catch (IOException e) {
-                      return false;
-                    }
-                  }
-              )
-              .collect(Collectors.toCollection(ArrayList::new));
-          Random r = new Random();
-          Collections.shuffle(infos, r);
-          infos = infos.subList(0, Math.min(infos.size(), numToCheck));
-          plan.add(target.fetch(infos, res -> {
-            ResourceInfo i = res.fst;
-            System.out.println("Checking " + i.path() + "...");
-            byte[] remoteSha;
-            try (InputStream in = res.snd) {
-              remoteSha = Util.sha256(in);
-            }
-            byte[] localSha;
-            try (InputStream in = new FileInputStream(i.path().toFile())) {
-              localSha = Util.sha256(in);
-            }
-            if (Arrays.equals(remoteSha, localSha)) {
-              System.out.println("OK!");
-            } else {
-              System.out.println("FAILURE");
-              System.out.println("  Local  SHA256: " + Arrays.toString(localSha));
-              System.out.println("  Remote SHA256: " + Arrays.toString(remoteSha));
-              success.set(false);
-            }
-          }));
-        }
-
-        System.out.println("Estimating costs...");
-        long bytesXferred = plan.stream().mapToLong(Op::estimatedDataTransfer).sum();
-        Price cost = plan.stream().map(Op::cost).reduce(Price.ZERO, Price::plus);
-        Price maint = plan.stream().map(Op::monthlyMaintenanceCost).reduce(Price.ZERO, Price::plus);
-
-        for (Op<?> op : plan) {
-          System.out.println(op);
-        }
-
-        System.out.println("-----------------------------------------");
-        System.out.println("Execution plan:");
-        System.out.println("    #ops: " + plan.size());
-        System.out.println("    xfer: ~" + Util.divideAndRoundUp(bytesXferred, 1024 * 1024) + " Mb");
-        System.out.println("    cost: ~" + Util.formatPrice(cost));
-        System.out.println("    maint: ~" + Util.formatPrice(maint));
-        System.out.println("-----------------------------------------");
-
-        if (!Objects.equals(cost.plus(maint), Price.ZERO)) {
-          if (!confirm("Proceed?")) {
-            return;
-          }
-        }
-
-        if (!dryRun) {
-          try {
-            BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(BACKLOG_CAPACITY);
-            ExecutorService executor = new ThreadPoolExecutor(
-                NTHREADS, NTHREADS,
-                Long.MAX_VALUE, TimeUnit.SECONDS,
-                queue,
-                new ThreadPoolExecutor.CallerRunsPolicy());
-
-            Instant start = Instant.now();
-            AtomicReference<Instant> lastSaveRef = new AtomicReference<>(start);
-
-            try (ProgressDisplay display = new ProgressDisplay(plan.size())) {
-              for (Op<?> op : plan) {
-                final ProgressDisplay.Task t = display.startTask(op.toString());
-                executor.execute(() -> {
-                  try {
-                    op.exec((numerator, denominator) -> display.reportProgress(t, numerator, denominator));
-                    display.finishTask(t);
-                    numSuccessful.incrementAndGet();
-                    if (backup) {
-                      Instant now = Instant.now();
-                      Instant lastSave = lastSaveRef.get();
-                      synchronized (checkpoint) {
-                        if (max(lastSave, start).isBefore(now.minus(5, ChronoUnit.MINUTES))) {
-                          token.set(checkpointStore.write(token.get(), Util.createInputStream(out -> {
-                            System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
-                            checkpoint.save(out);
-                            System.out.println("Checkpointed!");
-                          })));
-                          lastSaveRef.set(now);
-                        }
-                      }
-                    }
-                  } catch (Exception e) {
-                    onError(e);
-                  }
-                });
-              }
-
-              executor.shutdown();
-              executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-            }
-          } finally {
-            long nbkup = numSuccessful.get();
-            System.out.println(nbkup + " ops, " + numSkipped + " unchanged files, " + numErrs + " errors");
-            if (backup) {
-              Instant now = Instant.now();
-              token.set(checkpointStore.write(token.get(), Util.createInputStream(out -> {
-                System.out.println("Saving checkpoint [" + now.toEpochMilli() + ']');
-                checkpoint.save(out);
-                System.out.println("Checkpointed!");
-              })));
-            }
-          }
-        } else {
-          for (Op<?> o : plan) {
-            System.out.println(o);
-          }
-        }
-      }
+    if (local) {
+      StringRegister register = new SQLiteStringRegister(Paths.get("/tmp/backup/register.db"));
+      EventuallyConsistentDirectory dir = new LocalDirectory(Paths.get("/tmp/backup/indexes"));
+      ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
+      EventuallyConsistentBlobStore blobStore = new BlobStoreOnDirectory(new LocalDirectory(Paths.get("/tmp/backup/blobs")));
+      backupper = new BackerUpper(
+              indexStore, indexFormat,
+              blobStore, transform);
     } else {
-      throw new Exception("failed to get password");
+      if (true) throw new UnsupportedOperationException();
+
+      StringRegister register = new DynamoDBStringRegister(
+              new DynamoDB(AmazonDynamoDBClientBuilder
+                      .standard()
+                      .withRegion(AWS_REGION)
+                      .withCredentials(AWSTools.credentialsProvider())
+                      .build()),
+              DYNAMO_TABLE,
+              DYNAMO_REGISTER);
+
+      EventuallyConsistentDirectory dir = new S3Directory(
+              AmazonS3ClientBuilder
+                      .standard()
+                      .withCredentials(AWSTools.credentialsProvider())
+                      .withRegion(AWS_REGION)
+                      .build(),
+              S3_BUCKET);
+
+      ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
+
+      EventuallyConsistentBlobStore blobStore = new GlacierBlobStore(
+              AmazonGlacierClientBuilder
+                      .standard()
+                      .withCredentials(AWSTools.credentialsProvider())
+                      .withRegion(AWS_REGION)
+                      .build(),
+              GLACIER_VAULT_NAME);
+
+      backupper = new BackerUpper(
+              indexStore, indexFormat,
+              blobStore, transform);
     }
-    System.exit(success.get() ? 0 : 1);
+
+    // ------------------------------------------------------------------------------
+    // Do the work
+
+    if (backup) {
+      System.out.println("Scanning filesystem...");
+      List<SymLink> symlinks = new ArrayList<>();
+      List<HardLink> hardlinks = new ArrayList<>();
+      List<RegularFile> files = new ArrayList<>();
+      FileTools.forEachFile(config, symlinks::add, hardlinks::add, files::add);
+      if (!dryRun) {
+        backupper.backup(config.systemName(), password, password, files.stream(), symlinks.stream(), hardlinks.stream());
+      }
+    }
+
+    if (list) {
+      backupper.list(password).forEach(info -> {
+        System.out.println('[' + info.system().toString() + "] " + info.path());
+      });
+    }
+
+    if (gc) {
+      backupper.cleanup();
+    }
+
+    if (numToCheck > 0) {
+      throw new UnsupportedOperationException();
+    }
+
   }
 
   private static boolean confirm(String prompt) {
@@ -378,257 +262,6 @@ public class Main {
         return rules;
       }
     };
-  }
-
-  private static <T extends Comparable<T>> T max(T x, T y) {
-    return x.compareTo(y) < 0 ? y : x;
-  }
-
-  private static Stream<Op<Void>> planBackup(Config config, Checkpoint checkpoint, BackupTarget target) throws IOException {
-    Set<Path> presentSymlinks = new HashSet<>();
-    Set<Path> presentHardlinks = new HashSet<>();
-    Set<Path> presentFiles = new HashSet<>();
-
-    Map<Path, Path> checkpointedSymlinks = checkpoint.symlinks(config.systemName())
-        .collect(Collectors.toMap(SymLink::src, SymLink::dst));
-    Map<Path, Path> checkpointedHardlinks = checkpoint.hardlinks(config.systemName())
-        .collect(Collectors.toMap(HardLink::src, HardLink::dst));
-    Set<Path> checkpointedFiles = checkpoint.list()
-        .filter(r -> r.system().equals(config.systemName()))
-        .map(ResourceInfo::path)
-        .collect(Collectors.toCollection(HashSet::new));
-
-    List<Op<Void>> ops = new ArrayList<>();
-
-    // Add new things
-    FileTools.forEachFile(
-        config,
-        symlink -> {
-          presentSymlinks.add(symlink.src());
-          if (!Objects.equals(symlink.dst(), checkpointedSymlinks.get(symlink.src()))) {
-            ops.add(new FreeOp<Void>() {
-              @Override
-              public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-                checkpoint.noteSymLink(config.systemName(), symlink);
-                return null;
-              }
-
-              @Override
-              public String toString() {
-                return "MAKE SOFT LINK " + symlink.src() + " ---> " + symlink.dst();
-              }
-            });
-          } else {
-            numSkipped.incrementAndGet();
-          }
-        },
-        hardlink -> {
-          presentHardlinks.add(hardlink.src());
-          if (!Objects.equals(hardlink.dst(), checkpointedHardlinks.get(hardlink.src()))) {
-            ops.add(new FreeOp<Void>() {
-              @Override
-              public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-                checkpoint.noteHardLink(config.systemName(), hardlink);
-                return null;
-              }
-
-              @Override
-              public String toString() {
-                return "MAKE HARD LINK " + hardlink.src() + " ---> " + hardlink.dst();
-              }
-            });
-          } else {
-            numSkipped.incrementAndGet();
-          }
-        },
-        resource -> {
-          presentFiles.add(resource.path());
-          Instant checkpointModTime = checkpoint.modTime(resource, target);
-          Instant resourceModTime = resource.modTime();
-          if (checkpointModTime == null || !Objects.equals(checkpointModTime, resourceModTime)) {
-            long estimatedSize = resource.sizeEstimateInBytes();
-            ops.add(new Op<Void>() {
-              @Override
-              public Price cost() {
-                return target.estimatedCostOfDataTransfer(estimatedSize);
-              }
-
-              @Override
-              public Price monthlyMaintenanceCost() {
-                return target.estimatedMonthlyMaintenanceCost(estimatedSize);
-              }
-
-              @Override
-              public long estimatedDataTransfer() {
-                return estimatedSize;
-              }
-
-              @Override
-              public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-                // compute sha256 and size
-                StatisticsCollectingInputStream stream = new StatisticsCollectingInputStream(resource.open(), s -> progressCallback.reportProgress(s.getBytesRead(), estimatedSize * 2));
-                try (InputStream in = new BufferedInputStream(stream, Util.SUGGESTED_BUFFER_SIZE)) {
-                  int x;
-                  do {
-                    x = in.read();
-                  } while (x >= 0);
-                }
-                byte[] originalSha256 = stream.getSha256Digest();
-                long originalSize = stream.getBytesRead();
-
-                // determine whether the data is already backed up
-                BackupReport report = checkpoint.findBlob(target, originalSha256, originalSize);
-                if (report == null) {
-                  // if the data is not already backed up, back it up!
-                  stream = new StatisticsCollectingInputStream(resource.open(), s -> progressCallback.reportProgress(originalSize + s.getBytesRead(), estimatedSize * 2));
-                  try (InputStream toClose = new BufferedInputStream(stream, Util.SUGGESTED_BUFFER_SIZE)) {
-                    report = target.backup(toClose, estimatedSize);
-                  }
-                  assert stream.isClosed();
-
-                  // TODO: abort!
-                  if (!Arrays.equals(originalSha256, stream.getSha256Digest()) || originalSize != stream.getBytesRead()) {
-                    throw new ConcurrentModificationException(resource + " was modified during backup");
-                  }
-                }
-
-                byte[] finalSha256 = stream.getSha256Digest();
-                long finalSize = stream.getBytesRead();
-
-                checkpoint.noteSuccessfulBackup(target.name(), resource, new Sha256AndSize(finalSha256, finalSize), report);
-                return null;
-              }
-
-              @Override
-              public String toString() {
-                String startTime = checkpointModTime == null ? "missing" : checkpointModTime.toString();
-                return resource.path().toString() + " [" + startTime + " --> " + resourceModTime + ']';
-              }
-            });
-          } else {
-            numSkipped.incrementAndGet();
-          }
-        });
-
-    // Delete old things
-    Set<Path> symLinksToRemove = new HashSet<>(checkpointedSymlinks.keySet());
-    Set<Path> hardLinksToRemove = new HashSet<>(checkpointedHardlinks.keySet());
-    Set<Path> filesToRemove = new HashSet<>(checkpointedFiles);
-
-    symLinksToRemove.removeAll(presentSymlinks);
-    hardLinksToRemove.removeAll(presentHardlinks);
-    filesToRemove.removeAll(presentFiles);
-
-    for (Path p : filesToRemove) {
-      ops.add(new FreeOp<Void>() {
-        @Override
-        public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-          checkpoint.forgetBackup(config.systemName(), p);
-          return null;
-        }
-
-        @Override
-        public String toString() {
-          return "forget backed up file " + p.toString();
-        }
-      });
-    }
-
-    for (Path p : symLinksToRemove) {
-      ops.add(new FreeOp<Void>() {
-        @Override
-        public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-          checkpoint.forgetSymLink(config.systemName(), p);
-          return null;
-        }
-
-        @Override
-        public String toString() {
-          return "forget soft link " + p.toString();
-        }
-      });
-    }
-
-    for (Path p : hardLinksToRemove) {
-      ops.add(new FreeOp<Void>() {
-        @Override
-        public Void exec(ProgressDisplay.ProgressCallback progressCallback) throws IOException {
-          checkpoint.forgetHardLink(config.systemName(), p);
-          return null;
-        }
-
-        @Override
-        public String toString() {
-          return "forget hard link " + p.toString();
-        }
-      });
-    }
-
-    return ops.stream().filter(Objects::nonNull);
-  }
-
-  private static EventuallyConsistentDirectory checkpointDir(String password, boolean local) throws IOException {
-    Path cacheLoc = Paths.get("/tmp/s3cache");
-    EventuallyConsistentDirectory rawDir = local ?
-        LocalDirectory.TMP :
-        new CachedDirectory(new S3Directory(AmazonS3ClientBuilder
-                        .standard()
-                        .withCredentials(AWSTools.credentialsProvider())
-                        .withRegion(AWS_REGION)
-                        .build(), S3_BUCKET), cacheLoc);
-    return new TransformedDirectory(rawDir, new XZCompression().followedBy(new Encryption(password)));
-  }
-
-  private static ConsistentBlob checkpointStore(String password, boolean local) throws IOException {
-    return new TimestampedBlobInDirectory(checkpointDir(password, local));
-  }
-
-  /**
-   * Contains at least one element.
-   * Preferred format first.
-   */
-  private final static CheckpointFormat[] FORMATS = {
-          SqliteCheckpoint2.FORMAT,
-          SqliteCheckpoint.FORMAT,
-  };
-
-  private static Checkpoint loadCheckpoint(ConsistentBlob store, ConsistentBlob.Tag token) throws IOException {
-    System.out.println("Fetching checkpoint...");
-    for (CheckpointFormat format : FORMATS) {
-      Checkpoint result;
-      try (InputStream in = store.read(token)) {
-        result = format.tryRead(in);
-      } catch (IncorrectFormatException e) {
-        System.out.println("Does not match format " + format.name() + ": " + e.getMessage());
-        continue;
-      } catch (NoValue noValue) {
-        System.out.println("No index was found; creating a new one");
-        return FORMATS[0].createEmpty();
-      }
-      System.out.println("Loaded checkpoint " + token + " (format=" + format.name() + ')');
-      if (format != FORMATS[0]) {
-        System.out.println("Migrating from " + format.name() + " to " + FORMATS[0].name());
-        return FORMATS[0].migrateFrom(result);
-      }
-      return result;
-    }
-    throw new IOException("Checkpoint " + token + " does not match any known format");
-  }
-
-  private static BackupTarget getBackupTarget(String password, boolean local) throws GeneralSecurityException, UnsupportedEncodingException {
-    BackupTarget baseTarget = local ?
-        new FilesystemBackupTarget(Paths.get("/tmp/bkup")) :
-        new GlacierBackupTarget(GLACIER_ENDPOINT, GLACIER_VAULT_NAME);
-    return encryptTarget(baseTarget, password);
-  }
-
-  private static BackupTarget encryptTarget(BackupTarget backupTarget, String password) throws GeneralSecurityException, UnsupportedEncodingException {
-    return new EncryptedBackupTarget(backupTarget, password);
-  }
-
-  private static void onError(Exception e) {
-    numErrs.incrementAndGet();
-    e.printStackTrace();
   }
 
 }

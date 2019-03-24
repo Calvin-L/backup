@@ -6,16 +6,15 @@ import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.types.Id;
 import cal.bkup.types.RegularFile;
 import cal.bkup.types.Sha256AndSize;
+import cal.prim.BlobStoreOnDirectory;
 import cal.prim.ConsistentBlob;
 import cal.prim.ConsistentBlobOnEventuallyConsistentDirectory;
-import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.EventuallyConsistentDirectory;
 import cal.prim.InMemoryDir;
 import cal.prim.InMemoryStringRegister;
 import cal.prim.NoValue;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.DecryptedInputStream;
-import cal.prim.transforms.StatisticsCollectingInputStream;
 import cal.prim.transforms.XZCompression;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -26,7 +25,6 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 @Test
@@ -148,49 +146,6 @@ public class BackupTests {
     backup.list(newPassword).forEach(info -> {
       System.out.println("latest revision for " + info.path() + ": " + info.latestRevision().type);
     });
-
-  }
-
-  private static class BlobStoreOnDirectory implements EventuallyConsistentBlobStore {
-
-    private final EventuallyConsistentDirectory data;
-
-    public BlobStoreOnDirectory(EventuallyConsistentDirectory data) {
-      this.data = data;
-    }
-
-    @Override
-    public Stream<String> list() throws IOException {
-      return data.list();
-    }
-
-    @Override
-    public PutResult createOrReplace(InputStream stream) throws IOException {
-      String id = UUID.randomUUID().toString();
-      StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(stream, (x) -> { });
-      data.createOrReplace(id, in);
-      return new PutResult() {
-        @Override
-        public String identifier() {
-          return id;
-        }
-
-        @Override
-        public long bytesStored() {
-          return in.getBytesRead();
-        }
-      };
-    }
-
-    @Override
-    public InputStream open(String name) throws IOException {
-      return data.open(name);
-    }
-
-    @Override
-    public void delete(String name) throws IOException {
-      data.delete(name);
-    }
 
   }
 
