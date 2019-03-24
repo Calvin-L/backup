@@ -2,6 +2,7 @@ package cal.bkup;
 
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.JsonIndexFormat;
+import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.Config;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
@@ -17,6 +18,7 @@ import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.EventuallyConsistentDirectory;
 import cal.prim.GlacierBlobStore;
 import cal.prim.LocalDirectory;
+import cal.prim.Price;
 import cal.prim.S3Directory;
 import cal.prim.SQLiteStringRegister;
 import cal.prim.StringRegister;
@@ -33,6 +35,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.math3.fraction.BigFraction;
 
 import java.io.Console;
 import java.io.FileInputStream;
@@ -42,9 +45,10 @@ import java.io.InputStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,19 +56,40 @@ public class Main {
 
   private static final String AWS_REGION = "us-east-2";
   private static final String GLACIER_VAULT_NAME = "mybackups";
-  private static final String GLACIER_ENDPOINT = "glacier." + AWS_REGION + ".amazonaws.com";
   private static final String S3_BUCKET = "backupindex";
-  private static final String S3_ENDPOINT = "s3." + AWS_REGION + ".amazonaws.com";
   private static final String DYNAMO_TABLE = "backupconsistency";
   private static final String DYNAMO_REGISTER = "clock";
-  private static final int BACKLOG_CAPACITY = 8;
   private static final int NTHREADS = Runtime.getRuntime().availableProcessors();
   private static final String HOME = System.getProperty("user.home");
   private static final Path CFG_FILE = Paths.get(HOME, ".backup-config.json").toAbsolutePath();
 
-  private static final AtomicLong numSuccessful = new AtomicLong(0);
-  private static final AtomicLong numSkipped = new AtomicLong(0);
-  private static final AtomicLong numErrs = new AtomicLong(0);
+  // See https://aws.amazon.com/glacier/pricing/
+  // See https://aws.amazon.com/glacier/faqs/
+  private static final BigFraction PENNIES_PER_UPLOAD_REQ = new BigFraction(0.05).multiply(new BigFraction(100)).divide(new BigFraction(1000));
+  private static final BigFraction PENNIES_PER_GB_MONTH = new BigFraction(0.004).multiply(new BigFraction(100));
+  private static final BigFraction EXTRA_BYTES_PER_ARCHIVE = new BigFraction(32 * 1024); // 32 Kb
+  private static final BigFraction ONE_GB = new BigFraction(1024L * 1024L * 1024L);
+  private static final Duration ONE_MONTH = Duration.of(30, ChronoUnit.DAYS);
+  private static final Duration MINIMUM_STORAGE_DURATION = ONE_MONTH.multipliedBy(3);
+  private static final BigFraction EARLY_DELETION_FEE_PER_GB_MONTH = PENNIES_PER_GB_MONTH;
+  private static final BigFraction PENNIES_PER_DOWNLOAD_REQ = BigFraction.ZERO;
+  private static final BigFraction PENNIES_PER_DOWNLOAD_GB_REQ = BigFraction.ONE;
+  private static final BigFraction PENNIES_PER_DOWNLOAD_GB_XFER = new BigFraction(9); // assuming <10TB total transfer per month
+  private static final BigFraction MONTHS_PER_SECOND = BigFraction.ONE.divide(new BigFraction(ONE_MONTH.get(ChronoUnit.SECONDS)));
+  private static final StorageCostModel COST_MODEL = new StorageCostModel() {
+    @Override
+    public Price costToUploadBlob(long numBytes) {
+      return numBytes <= AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK ?
+              () -> PENNIES_PER_UPLOAD_REQ :
+              () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(numBytes / AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK).add(BigFraction.TWO));
+    }
+
+    @Override
+    public Price monthlyStorageCostForBlob(long numBytes) {
+      BigFraction value = PENNIES_PER_GB_MONTH.multiply(new BigFraction(numBytes).add(EXTRA_BYTES_PER_ARCHIVE)).divide(ONE_GB);
+      return () -> value;
+    }
+  };
 
   private static void showHelp(Options options) {
     new HelpFormatter().printHelp("backup [options]", options);
@@ -182,8 +207,14 @@ public class Main {
       List<HardLink> hardlinks = new ArrayList<>();
       List<RegularFile> files = new ArrayList<>();
       FileTools.forEachFile(config, symlinks::add, hardlinks::add, files::add);
-      if (!dryRun) {
-        backupper.backup(config.systemName(), password, password, files.stream(), symlinks.stream(), hardlinks.stream());
+      System.out.println("Planning backup...");
+      BackerUpper.BackupPlan plan = backupper.planBackup(config.systemName(), password, password, COST_MODEL, files, symlinks, hardlinks);
+      System.out.println("Estimated costs:");
+      System.out.println("  uploaded bytes:      " + Util.formatSize(plan.estimatedBytesUploaded()));
+      System.out.println("  backup cost now:     " + Util.formatPrice(plan.estimatedExecutionCost()));
+      System.out.println("  monthly maintenance: " + Util.formatPrice(plan.estimatedMonthlyCost()));
+      if (!dryRun && confirm("Proceed?")) {
+        plan.execute();
       }
     }
 

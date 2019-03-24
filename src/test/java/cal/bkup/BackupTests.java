@@ -25,6 +25,8 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.stream.Stream;
 
 @Test
@@ -77,7 +79,7 @@ public class BackupTests {
       }
     };
 
-    backup.backup(system, password, password, Stream.of(f), Stream.empty(), Stream.empty());
+    backup.backup(system, password, password, Collections.singleton(f), Collections.emptyList(), Collections.emptyList());
 
     Assert.assertEquals(blobDir.list().count(), 1L);
 
@@ -118,7 +120,7 @@ public class BackupTests {
     // backup with new password
     String newPassword = "fubar";
     Assert.assertNotEquals(password, newPassword);
-    other.backup(system, password, newPassword, Stream.of(f), Stream.empty(), Stream.empty());
+    other.backup(system, password, newPassword, Collections.singleton(f), Collections.emptyList(), Collections.emptyList());
 
     // index is encrypted with new password
     try (DecryptedInputStream s = new DecryptedInputStream(Util.buffered(indexStore.read(indexStore.head())), newPassword)) {
@@ -129,7 +131,7 @@ public class BackupTests {
     Assert.assertEquals(blobDir.list().count(), 1L);
 
     // backup without `f`
-    other.backup(system, newPassword, newPassword, Stream.empty(), Stream.empty(), Stream.empty());
+    other.backup(system, newPassword, newPassword, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
 
     // assert empty
     other.list(newPassword).forEach(info -> {

@@ -7,11 +7,13 @@ import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.RegularFile;
 import cal.bkup.types.Sha256AndSize;
+import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SymLink;
 import cal.prim.ConsistentBlob;
 import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.NoValue;
 import cal.prim.PreconditionFailed;
+import cal.prim.Price;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.Encryption;
 import cal.prim.transforms.StatisticsCollectingInputStream;
@@ -21,6 +23,7 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
@@ -57,7 +60,69 @@ public class BackerUpper {
     this.transformer = transformer;
   }
 
-  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Stream<RegularFile> files, Stream<SymLink> symlinks, Stream<HardLink> hardlinks) throws IOException {
+  public interface BackupPlan {
+    long estimatedBytesUploaded();
+    Price estimatedExecutionCost();
+    Price estimatedMonthlyCost();
+    void execute() throws IOException;
+  }
+
+  public BackupPlan planBackup(
+          Id whatSystemIsThis,
+          String passwordForIndex,
+          String newPasswordForIndex,
+          StorageCostModel blobStorageCosts,
+          Collection<RegularFile> files,
+          Collection<SymLink> symlinks,
+          Collection<HardLink> hardlinks) throws IOException {
+
+    loadIndexIfMissing(passwordForIndex);
+
+    long bytesUploaded = 0;
+    Price totalUploadCost = Price.ZERO;
+    Price monthlyStorageCost = Price.ZERO;
+
+    for (RegularFile f : files) {
+      BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.path());
+      if (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE && latest.modTime.equals(f.modTime())) {
+        // no action taken!
+      } else {
+        long size = f.sizeEstimateInBytes();
+        bytesUploaded += size;
+        totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
+        monthlyStorageCost = monthlyStorageCost.plus(blobStorageCosts.monthlyStorageCostForBlob(size));
+      }
+    }
+
+    final long finalBytes = bytesUploaded;
+    final Price totalPrice = totalUploadCost;
+    final Price totalMonthlyPrice = monthlyStorageCost;
+
+    return new BackupPlan() {
+      @Override
+      public long estimatedBytesUploaded() {
+        return finalBytes;
+      }
+
+      @Override
+      public Price estimatedExecutionCost() {
+        return totalPrice;
+      }
+
+      @Override
+      public Price estimatedMonthlyCost() {
+        return totalMonthlyPrice;
+      }
+
+      @Override
+      public void execute() throws IOException {
+        backup(whatSystemIsThis, passwordForIndex, newPasswordForIndex, files, symlinks, hardlinks);
+      }
+    };
+
+  }
+
+  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks) throws IOException {
     String currentPassword = passwordForIndex;
     loadIndexIfMissing(currentPassword);
 
