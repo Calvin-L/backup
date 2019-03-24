@@ -31,6 +31,7 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -146,6 +147,26 @@ public class BackerUpper {
   }
 
   public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException {
+
+    // Source of this trick:
+    // https://stackoverflow.com/a/2922031/784284
+    final AtomicBoolean keepRunning = new AtomicBoolean(true);
+    final Thread backupThread = Thread.currentThread();
+    Thread shutdownHook = new Thread(() -> {
+      keepRunning.set(false);
+      for (;;) {
+        try {
+          backupThread.join();
+          return;
+        } catch (InterruptedException ignored) {
+          System.err.println("Ignoring interrupt...");
+        }
+      }
+    });
+
+    Runtime runtime = Runtime.getRuntime();
+    runtime.addShutdownHook(shutdownHook);
+
     try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
       String currentPassword = passwordForIndex;
       loadIndexIfMissing(currentPassword);
@@ -161,6 +182,9 @@ public class BackerUpper {
 
           try {
             while (it.hasNext()) {
+              if (!keepRunning.get()) {
+                return;
+              }
               RegularFile f = it.next();
               inThisBackup.add(f.path());
               uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
@@ -219,6 +243,13 @@ public class BackerUpper {
           // No need to reset the iterators!
           // The files that were backed up have been merged into the index.
         }
+      }
+    } finally {
+      try {
+        runtime.removeShutdownHook(shutdownHook);
+      } catch (IllegalStateException ignored) {
+        // This happens if the JVM is shutting down, in which case our hook
+        // is already committed to running and removing it won't matter.
       }
     }
   }
