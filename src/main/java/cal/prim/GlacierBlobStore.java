@@ -300,6 +300,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
             .withVaultName(vaultName)
             .withJobParameters(new JobParameters()
                     .withType("archive-retrieval")
+                    .withTier("Expedited")
                     .withArchiveId(name)));
     String jobId = initJobRes.getJobId();
     System.out.println("Created new job " + jobId);
