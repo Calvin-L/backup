@@ -177,6 +177,7 @@ public class BackerUpper {
               inThisBackup.add(link.src());
               BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
               if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.dst())) {
+                progress.finishTask(task);
                 continue;
               }
               index.appendRevision(whatSystemIsThis, link.src(), link);
@@ -189,9 +190,9 @@ public class BackerUpper {
               inThisBackup.add(link.src());
               BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
               if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.dst())) {
+                progress.finishTask(task);
                 continue;
               }
-              System.out.println("Adding hard link " + link.src() + " --> " + link.dst());
               index.appendRevision(whatSystemIsThis, link.src(), link);
               progress.finishTask(task);
             }
