@@ -55,7 +55,7 @@ import java.util.regex.Pattern;
 public class Main {
 
   private static final String AWS_REGION = "us-east-2";
-  private static final String GLACIER_VAULT_NAME = "mybackups";
+  private static final String GLACIER_VAULT_NAME = "blobs";
   private static final String S3_BUCKET = "backupindex";
   private static final String DYNAMO_TABLE = "backupconsistency";
   private static final String DYNAMO_REGISTER = "clock";
