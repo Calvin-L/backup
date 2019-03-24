@@ -57,6 +57,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -110,7 +111,8 @@ public class Main {
 
     // flags
     options.addOption("h", "help", false, "Show help and quit");
-    options.addOption("p", "password", true, "Encryption password");
+    options.addOption("p", "password", true, "Decryption password");
+    options.addOption("P", "new-password", true, "Encryption password (defaults to the decryption password; prompts if you give an empty argument)");
     options.addOption("L", "local", false, "Local backup to /tmp (for testing)");
     options.addOption("d", "dry-run", false, "Show what would be done, but do nothing");
 
@@ -147,7 +149,14 @@ public class Main {
       return;
     }
 
-    final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword();
+    final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword("Password");
+    final String newPassword = cli.hasOption('P')
+            ? (cli.getOptionValue('P').isEmpty() ? Util.readPassword("New password") : cli.getOptionValue('P'))
+            : password;
+
+    if (!Objects.equals(password, newPassword) && !backup) {
+      System.err.println("WARNING: a new password was specified without '-b'; the new password will be ignored.");
+    }
 
     // ------------------------------------------------------------------------------
     // Set up actors and configuration
@@ -216,7 +225,7 @@ public class Main {
       List<RegularFile> files = new ArrayList<>();
       FileTools.forEachFile(config, symlinks::add, hardlinks::add, files::add);
       System.out.println("Planning backup...");
-      BackerUpper.BackupPlan plan = backupper.planBackup(config.systemName(), password, password, COST_MODEL, files, symlinks, hardlinks);
+      BackerUpper.BackupPlan plan = backupper.planBackup(config.systemName(), password, newPassword, COST_MODEL, files, symlinks, hardlinks);
       System.out.println("Estimated costs:");
       System.out.println("  uploaded bytes:      " + Util.formatSize(plan.estimatedBytesUploaded()));
       System.out.println("  backup cost now:     " + Util.formatPrice(plan.estimatedExecutionCost()));
@@ -227,7 +236,7 @@ public class Main {
     }
 
     if (list) {
-      backupper.list(password).forEach(info -> {
+      backupper.list(newPassword).forEach(info -> {
         System.out.println('[' + info.system().toString() + "] " + info.path());
       });
     }
@@ -237,7 +246,7 @@ public class Main {
     }
 
     if (numToCheck > 0) {
-      List<Pair<Path, Sha256AndSize>> candidates = backupper.list(password)
+      List<Pair<Path, Sha256AndSize>> candidates = backupper.list(newPassword)
               .filter(item -> item.system().equals(config.systemName()) && item.latestRevision().type == BackupIndex.FileType.REGULAR_FILE)
               .map(item -> new Pair<>(item.path(), item.latestRevision().summary))
               .collect(Collectors.toList());
@@ -254,7 +263,7 @@ public class Main {
             localSummaries.add(Util.summarize(in, s -> { }));
           }
           Sha256AndSize thing = candidates.get(i).snd;
-          try (InputStream in = Util.buffered(backupper.restore(password, thing))) {
+          try (InputStream in = Util.buffered(backupper.restore(newPassword, thing))) {
             remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.size())));
           }
           display.finishTask(t);

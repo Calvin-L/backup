@@ -97,14 +97,14 @@ public abstract class Util {
     throw new RuntimeException("failure");
   }
 
-  public static String readPassword() {
+  public static String readPassword(String prompt) {
     Console cons = System.console();
     if (cons == null) {
       throw new IllegalStateException("not connected to console");
     }
-    char[] c1 = cons.readPassword("%s", "Password for encryption: ");
+    char[] c1 = cons.readPassword("%s: ", prompt);
     if (c1 == null) return null;
-    char[] c2 = cons.readPassword("%s", "Confirm: ");
+    char[] c2 = cons.readPassword("Confirm: ");
     if (c2 == null) return null;
     if (!Arrays.equals(c1, c2)) {
       System.err.println("passwords do not match");
