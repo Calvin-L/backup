@@ -1,14 +1,17 @@
 package cal.bkup;
 
 import cal.bkup.impls.BackerUpper;
+import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormat;
-import cal.bkup.types.StorageCostModel;
+import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.types.Config;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.RegularFile;
 import cal.bkup.types.Rule;
+import cal.bkup.types.Sha256AndSize;
+import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SymLink;
 import cal.prim.BlobStoreOnDirectory;
 import cal.prim.ConsistentBlob;
@@ -18,6 +21,7 @@ import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.EventuallyConsistentDirectory;
 import cal.prim.GlacierBlobStore;
 import cal.prim.LocalDirectory;
+import cal.prim.Pair;
 import cal.prim.Price;
 import cal.prim.S3Directory;
 import cal.prim.SQLiteStringRegister;
@@ -43,14 +47,18 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class Main {
 
@@ -229,7 +237,43 @@ public class Main {
     }
 
     if (numToCheck > 0) {
-      throw new UnsupportedOperationException();
+      List<Pair<Path, Sha256AndSize>> candidates = backupper.list(password)
+              .filter(item -> item.system().equals(config.systemName()) && item.latestRevision().type == BackupIndex.FileType.REGULAR_FILE)
+              .map(item -> new Pair<>(item.path(), item.latestRevision().summary))
+              .collect(Collectors.toList());
+      Random random = new Random();
+      Collections.shuffle(candidates, random);
+      int len = Math.min(numToCheck, candidates.size());
+      List<Sha256AndSize> localSummaries = new ArrayList<>();
+      List<Sha256AndSize> remoteSummaries = new ArrayList<>();
+      try (ProgressDisplay display = new ProgressDisplay(len)) {
+        for (int i = 0; i < len; ++i) {
+          Path path = candidates.get(i).fst;
+          ProgressDisplay.Task t = display.startTask("fetch " + path);
+          try (InputStream in = Util.buffered(Files.newInputStream(path))) {
+            localSummaries.add(Util.summarize(in, s -> { }));
+          }
+          Sha256AndSize thing = candidates.get(i).snd;
+          try (InputStream in = Util.buffered(backupper.restore(password, thing))) {
+            remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.size())));
+          }
+          display.finishTask(t);
+        }
+      }
+
+      boolean ok = true;
+      for (int i = 0; i < len; ++i) {
+        System.out.print(candidates.get(i).fst + ": ");
+        if (localSummaries.get(i).equals(remoteSummaries.get(i))) {
+          System.out.println("OK");
+        } else {
+          System.out.println("got " + remoteSummaries.get(i));
+        }
+      }
+
+      if (!ok) {
+        System.exit(1);
+      }
     }
 
   }

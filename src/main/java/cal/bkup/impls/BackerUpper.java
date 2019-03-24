@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -254,9 +255,13 @@ public class BackerUpper {
     }));
   }
 
-  void restore(String indexPassword, Stream<Path> files, Path outputDir) throws IOException {
+  public InputStream restore(String indexPassword, Sha256AndSize blob) throws IOException {
     loadIndexIfMissing(indexPassword);
-    throw new UnsupportedOperationException();
+    BackupIndex.BackupReportAndKey report = index.lookupBlob(blob);
+    if (report == null) {
+      throw new NoSuchElementException();
+    }
+    return transformer.followedBy(new Encryption(report.key)).unApply(blobStore.open(report.idAtTarget().toString()));
   }
 
   public void cleanup() throws IOException {
