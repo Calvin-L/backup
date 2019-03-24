@@ -114,7 +114,7 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
     String expectedId = upcast(expected).id;
     String currentName = clock.read();
     if (!currentName.equals(expectedId)) {
-      throw new PreconditionFailed();
+      throw new PreconditionFailed("expected "+ expectedId + " but got " + currentName);
     }
 
     long entryNumber = associatedClockValue(expectedId);

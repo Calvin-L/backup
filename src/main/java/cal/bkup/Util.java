@@ -1,8 +1,11 @@
 package cal.bkup;
 
 import cal.bkup.types.IOConsumer;
+import cal.bkup.types.Sha256AndSize;
 import cal.prim.Price;
+import cal.prim.transforms.StatisticsCollectingInputStream;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Console;
 import java.io.FilterInputStream;
@@ -14,10 +17,12 @@ import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 public abstract class Util {
 
@@ -63,6 +68,16 @@ public abstract class Util {
       count += n;
     }
     return count;
+  }
+
+  public static Sha256AndSize summarize(InputStream in, Consumer<StatisticsCollectingInputStream> progressCallback) throws IOException {
+    StatisticsCollectingInputStream s = new StatisticsCollectingInputStream(in, progressCallback);
+    drain(s);
+    return new Sha256AndSize(s.getSha256Digest(), s.getBytesRead());
+  }
+
+  public static BufferedInputStream buffered(InputStream in) {
+    return new BufferedInputStream(in, SUGGESTED_BUFFER_SIZE);
   }
 
   public static byte[] read(InputStream in) throws IOException {
@@ -243,7 +258,7 @@ public abstract class Util {
     };
   }
 
-  private static long drain(InputStream in) throws IOException {
+  public static long drain(InputStream in) throws IOException {
     byte[] buf = MEM_BUFFER.get();
     long count = 0;
     int n;
@@ -288,6 +303,17 @@ public abstract class Util {
 
   public static void async(Runnable job) {
     new Thread(job).start();
+  }
+
+  private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+  private static final String PASSWORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  private static final byte PASSWORD_LEN = 30;
+  public static synchronized String randomPassword() {
+    char[] chars = new char[PASSWORD_LEN];
+    for (int i = 0; i < PASSWORD_LEN; ++i) {
+      chars[i] = PASSWORD_CHARS.charAt(SECURE_RANDOM.nextInt(PASSWORD_CHARS.length()));
+    }
+    return new String(chars);
   }
 
 }
