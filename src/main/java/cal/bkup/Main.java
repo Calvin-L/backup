@@ -32,6 +32,8 @@ import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
 import com.amazonaws.services.dynamodbv2.document.DynamoDB;
 import com.amazonaws.services.glacier.AmazonGlacierClientBuilder;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -294,9 +296,13 @@ public class Main {
 
   private static Config loadConfig(Path target) throws IOException {
 
+    JsonFactory f = new JsonFactory();
+    f.enable(JsonParser.Feature.ALLOW_COMMENTS);
+    ObjectMapper mapper = new ObjectMapper(f);
+
     RawConfig r;
     try (InputStream in = new FileInputStream(target.toString())) {
-      r = new ObjectMapper().readValue(in, RawConfig.class);
+      r = mapper.readValue(in, RawConfig.class);
     }
 
     Id systemId = new Id(r.system);
