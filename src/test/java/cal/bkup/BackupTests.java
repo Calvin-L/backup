@@ -27,7 +27,6 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.stream.Stream;
 
 @Test
 public class BackupTests {
@@ -79,7 +78,8 @@ public class BackupTests {
       }
     };
 
-    backup.backup(system, password, password, Collections.singleton(f), Collections.emptyList(), Collections.emptyList());
+    Collection<Path> toForget = Collections.emptyList();
+    backup.backup(system, password, password, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
 
     Assert.assertEquals(blobDir.list().count(), 1L);
 
@@ -120,7 +120,7 @@ public class BackupTests {
     // backup with new password
     String newPassword = "fubar";
     Assert.assertNotEquals(password, newPassword);
-    other.backup(system, password, newPassword, Collections.singleton(f), Collections.emptyList(), Collections.emptyList());
+    other.backup(system, password, newPassword, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
 
     // index is encrypted with new password
     try (DecryptedInputStream s = new DecryptedInputStream(Util.buffered(indexStore.read(indexStore.head())), newPassword)) {
@@ -131,7 +131,7 @@ public class BackupTests {
     Assert.assertEquals(blobDir.list().count(), 1L);
 
     // backup without `f`
-    other.backup(system, newPassword, newPassword, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+    other.backup(system, newPassword, newPassword, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.singleton(f.path()));
 
     // assert empty
     other.list(newPassword).forEach(info -> {

@@ -240,7 +240,7 @@ public class Main {
       return false;
     }
     String input = cons.readLine("%s [y/n] ", prompt);
-    return Character.toLowerCase(input.charAt(0)) == 'y';
+    return input.length() > 0 && Character.toLowerCase(input.charAt(0)) == 'y';
   }
 
   private static class RawConfig {

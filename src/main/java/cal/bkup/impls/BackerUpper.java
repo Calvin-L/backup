@@ -5,6 +5,7 @@ import cal.bkup.types.BackupReport;
 import cal.bkup.types.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
+import cal.bkup.types.Link;
 import cal.bkup.types.RegularFile;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
@@ -84,15 +85,34 @@ public class BackerUpper {
     Price totalUploadCost = Price.ZERO;
     Price monthlyStorageCost = Price.ZERO;
     Collection<RegularFile> filteredFiles = new ArrayList<>();
+    Collection<Path> toForget = new ArrayList<>();
+    Set<Path> inThisBackup = new HashSet<>();
 
     for (RegularFile f : files) {
+      inThisBackup.add(f.path());
       BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.path());
-      if (latest == null || latest.type != BackupIndex.FileType.REGULAR_FILE || !Objects.equals(latest.modTime, f.modTime())) {
+      Instant lastModTime = (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE) ? latest.modTime : null;
+      if (!Objects.equals(lastModTime, f.modTime())) {
+        System.out.println(" --> " + f.path() + " [" + lastModTime + " --> " + f.modTime() + ']');
         long size = f.sizeEstimateInBytes();
         bytesUploaded += size;
         totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
         monthlyStorageCost = monthlyStorageCost.plus(blobStorageCosts.monthlyStorageCostForBlob(size));
         filteredFiles.add(f);
+      }
+    }
+
+    for (Link l : symlinks) {
+      inThisBackup.add(l.src());
+    }
+
+    for (Link l : hardlinks) {
+      inThisBackup.add(l.src());
+    }
+
+    for (Path p : index.knownPaths(whatSystemIsThis)) {
+      if (!inThisBackup.contains(p)) {
+        toForget.add(p);
       }
     }
 
@@ -118,14 +138,14 @@ public class BackerUpper {
 
       @Override
       public void execute() throws IOException {
-        backup(whatSystemIsThis, passwordForIndex, newPasswordForIndex, filteredFiles, symlinks, hardlinks);
+        backup(whatSystemIsThis, passwordForIndex, newPasswordForIndex, filteredFiles, symlinks, hardlinks, toForget);
       }
     };
 
   }
 
-  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks) throws IOException {
-    try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2)) {
+  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException {
+    try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
       String currentPassword = passwordForIndex;
       loadIndexIfMissing(currentPassword);
 
@@ -153,30 +173,31 @@ public class BackerUpper {
 
             while (symLinkIterator.hasNext()) {
               SymLink link = symLinkIterator.next();
+              ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.src() + " --> " + link.dst());
               inThisBackup.add(link.src());
               BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
-              if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && latest.linkTarget.equals(link.dst())) {
+              if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.dst())) {
                 continue;
               }
-              System.out.println("Adding symlink " + link.src() + " --> " + link.dst());
               index.appendRevision(whatSystemIsThis, link.src(), link);
+              progress.finishTask(task);
             }
 
             while (hardLinkIterator.hasNext()) {
               HardLink link = hardLinkIterator.next();
+              ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.src() + " --> " + link.dst());
               inThisBackup.add(link.src());
               BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
-              if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && latest.linkTarget.equals(link.dst())) {
+              if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.dst())) {
                 continue;
               }
               System.out.println("Adding hard link " + link.src() + " --> " + link.dst());
               index.appendRevision(whatSystemIsThis, link.src(), link);
+              progress.finishTask(task);
             }
 
-            for (Path p : index.knownPaths(whatSystemIsThis)) {
-              if (!inThisBackup.contains(p)) {
-                index.appendTombstone(whatSystemIsThis, p);
-              }
+            for (Path p : toForget) {
+              index.appendTombstone(whatSystemIsThis, p);
             }
           } finally {
             saveIndex(newPasswordForIndex);
@@ -314,8 +335,10 @@ public class BackerUpper {
 
   private void forceReloadIndex(String password) throws IOException {
     tagForLastIndexLoad = indexStore.head();
+    System.out.println("Reading index " + tagForLastIndexLoad + "...");
     try (InputStream in = transformer.followedBy(new Encryption(password)).unApply(indexStore.read(tagForLastIndexLoad))) {
       index = indexFormat.load(in);
+      System.out.println(" *** read index");
     } catch (NoValue noValue) {
       System.out.println("No index was found; creating a new one");
       index = new BackupIndex();
