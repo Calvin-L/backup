@@ -171,7 +171,6 @@ public class BackerUpper {
       String currentPassword = passwordForIndex;
       loadIndexIfMissing(currentPassword);
 
-      Set<Path> inThisBackup = new HashSet<>();
       Iterator<RegularFile> it = files.iterator();
       Iterator<SymLink> symLinkIterator = symlinks.iterator();
       Iterator<HardLink> hardLinkIterator = hardlinks.iterator();
@@ -186,7 +185,6 @@ public class BackerUpper {
                 return;
               }
               RegularFile f = it.next();
-              inThisBackup.add(f.path());
               uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
               Instant now = Instant.now();
               if (Util.ge(now, lastIndexSave.plus(Duration.ofMinutes(5)))) {
@@ -199,7 +197,6 @@ public class BackerUpper {
             while (symLinkIterator.hasNext()) {
               SymLink link = symLinkIterator.next();
               ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.src() + " --> " + link.dst());
-              inThisBackup.add(link.src());
               BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
               if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.dst())) {
                 progress.finishTask(task);
@@ -212,7 +209,6 @@ public class BackerUpper {
             while (hardLinkIterator.hasNext()) {
               HardLink link = hardLinkIterator.next();
               ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.src() + " --> " + link.dst());
-              inThisBackup.add(link.src());
               BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
               if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.dst())) {
                 progress.finishTask(task);
