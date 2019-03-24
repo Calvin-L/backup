@@ -226,8 +226,8 @@ public class BackerUpper {
           }
 
           return;
-        } catch (PreconditionFailed ignored) {
-          System.out.println("Checkpoint failed due to " + ignored);
+        } catch (PreconditionFailed e) {
+          System.out.println("Checkpoint failed due to " + e);
           System.out.println("This probably happened because another process modified the");
           System.out.println("checkpoint while this process was running.  This process will");
           System.out.println("reload the checkpoint, merge its progress, and try again...");
