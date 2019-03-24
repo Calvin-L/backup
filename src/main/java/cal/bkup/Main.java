@@ -174,8 +174,6 @@ public class Main {
               indexStore, indexFormat,
               blobStore, transform);
     } else {
-      if (true) throw new UnsupportedOperationException();
-
       StringRegister register = new DynamoDBStringRegister(
               new DynamoDB(AmazonDynamoDBClientBuilder
                       .standard()
