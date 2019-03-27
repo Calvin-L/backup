@@ -21,6 +21,7 @@ import cal.prim.transforms.StatisticsCollectingInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
@@ -148,6 +150,8 @@ public class BackerUpper {
 
   public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException {
 
+    List<String> warnings = new ArrayList<>();
+
     // Source of this trick:
     // https://stackoverflow.com/a/2922031/784284
     final AtomicBoolean keepRunning = new AtomicBoolean(true);
@@ -185,7 +189,11 @@ public class BackerUpper {
                 return;
               }
               RegularFile f = it.next();
-              uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
+              try {
+                uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
+              } catch (NoSuchFileException ignored) {
+                warnings.add("The file " + f.path() + " was deleted before it could be backed up");
+              }
               Instant now = Instant.now();
               if (Util.ge(now, lastIndexSave.plus(Duration.ofMinutes(5)))) {
                 saveIndex(newPasswordForIndex);
@@ -222,7 +230,17 @@ public class BackerUpper {
               index.appendTombstone(whatSystemIsThis, p);
             }
           } finally {
-            saveIndex(newPasswordForIndex);
+            try {
+              saveIndex(newPasswordForIndex);
+            } finally {
+              if (warnings.size() > 0) {
+                System.out.println(warnings.size() + " warnings:");
+                for (String w : warnings) {
+                  System.out.print(" - ");
+                  System.out.println(w);
+                }
+              }
+            }
           }
 
           return;
@@ -301,6 +319,15 @@ public class BackerUpper {
   // -------------------------------------------------------------------------
   // Helpers for doing backups
 
+  /**
+   *
+   * @param index
+   * @param systemId
+   * @param f
+   * @param display
+   * @throws NoSuchFileException if another process deletes the file before or during upload
+   * @throws IOException
+   */
   private void uploadAndAddToIndex(BackupIndex index, Id systemId, RegularFile f, ProgressDisplay display) throws IOException {
     // (1) Get the modification time.
     // This has to happen before computing the checksum.  Otherwise,
@@ -316,8 +343,9 @@ public class BackerUpper {
       summary = Util.summarize(in, stream -> {
         display.reportProgress(checksumTask, stream.getBytesRead(), f.sizeEstimateInBytes());
       });
+    } finally {
+      display.finishTask(checksumTask);
     }
-    display.finishTask(checksumTask);
 
     // (3) Is this file known to the index?  Then no problem!
     BackupReport report = index.lookupBlob(summary);
@@ -337,8 +365,9 @@ public class BackerUpper {
         EventuallyConsistentBlobStore.PutResult result = blobStore.createOrReplace(transformed);
         identifier = new Id(result.identifier());
         sizeAtTarget = result.bytesStored();
+      } finally {
+        display.finishTask(task); // TODO: print identifier and byte count?
       }
-      display.finishTask(task); // TODO: print identifier and byte count?
       assert in.isClosed();
       long size = in.getBytesRead();
       byte[] sha256 = in.getSha256Digest();
