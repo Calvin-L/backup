@@ -68,7 +68,7 @@ public class BackupTests {
       }
 
       @Override
-      public long sizeEstimateInBytes() {
+      public long sizeInBytes() {
         return 1024;
       }
 
@@ -86,7 +86,7 @@ public class BackupTests {
     // blob compression should work
     try (InputStream s = blobDir.open(blobDir.list().findAny().get())) {
       long size = Util.drain(s);
-      Assert.assertTrue(size < f.sizeEstimateInBytes(), "size(" + size + ") is not less than estimate(" + f.sizeEstimateInBytes() + ')');
+      Assert.assertTrue(size < f.sizeInBytes(), "allegedly-compressed size(" + size + ") is not less than original(" + f.sizeInBytes() + ')');
     }
 
     // blob encryption should work

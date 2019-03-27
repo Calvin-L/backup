@@ -60,7 +60,7 @@ public class PhysicalFilesystem implements Filesystem {
           }
 
           @Override
-          public long sizeEstimateInBytes() {
+          public long sizeInBytes() {
             return size;
           }
 

@@ -98,7 +98,7 @@ public class BackerUpper {
       Instant lastModTime = (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE) ? latest.modTime : null;
       if (!Objects.equals(lastModTime, f.modTime())) {
         System.out.println(" --> " + f.path() + " [" + lastModTime + " --> " + f.modTime() + ']');
-        long size = f.sizeEstimateInBytes();
+        long size = f.sizeInBytes();
         bytesUploaded += size;
         totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
         monthlyStorageCost = monthlyStorageCost.plus(blobStorageCosts.monthlyStorageCostForBlob(size));
@@ -341,7 +341,7 @@ public class BackerUpper {
     Sha256AndSize summary;
     try (InputStream in = Util.buffered(f.open())) {
       summary = Util.summarize(in, stream -> {
-        display.reportProgress(checksumTask, stream.getBytesRead(), f.sizeEstimateInBytes());
+        display.reportProgress(checksumTask, stream.getBytesRead(), f.sizeInBytes());
       });
     } finally {
       display.finishTask(checksumTask);
@@ -356,7 +356,7 @@ public class BackerUpper {
       ProgressDisplay.Task task = display.startTask(uploadDescription);
       String key = Util.randomPassword();
       Consumer<StatisticsCollectingInputStream> reportProgress = s -> {
-        display.reportProgress(task, s.getBytesRead(), f.sizeEstimateInBytes());
+        display.reportProgress(task, s.getBytesRead(), f.sizeInBytes());
       };
       Id identifier;
       long sizeAtTarget;
