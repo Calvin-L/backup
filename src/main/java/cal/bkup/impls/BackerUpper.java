@@ -55,6 +55,7 @@ public class BackerUpper {
   private final IndexFormat indexFormat;
   private final EventuallyConsistentBlobStore blobStore;
   private final BlobTransformer transformer;
+  private final Duration PERIODIC_INDEX_RATE = Duration.ofMinutes(15);
 
   // Cached data
   private BackupIndex index = null;
@@ -195,7 +196,7 @@ public class BackerUpper {
                 warnings.add("The file " + f.path() + " was deleted before it could be backed up");
               }
               Instant now = Instant.now();
-              if (Util.ge(now, lastIndexSave.plus(Duration.ofMinutes(5)))) {
+              if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
                 saveIndex(newPasswordForIndex);
                 currentPassword = newPasswordForIndex;
                 lastIndexSave = now;
