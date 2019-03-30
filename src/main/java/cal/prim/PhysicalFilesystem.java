@@ -73,17 +73,7 @@ public class PhysicalFilesystem implements Filesystem {
 
       @Override
       protected void onSymLink(Path src, Path dst) throws IOException {
-        onSymlink.accept(new SymLink() {
-          @Override
-          public Path src() {
-            return src;
-          }
-
-          @Override
-          public Path dst() {
-            return dst;
-          }
-        });
+        onSymlink.accept(new SymLink(src, dst));
       }
     });
   }

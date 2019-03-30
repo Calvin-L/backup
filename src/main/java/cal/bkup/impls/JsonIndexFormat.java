@@ -74,30 +74,10 @@ public class JsonIndexFormat implements IndexFormat {
             index.appendRevision(system, path, modTime, new Sha256AndSize(Util.stringToSha256(rev.sha256), rev.size));
           } else if (rev.symLinkDst != null) {
             Path p = Paths.get(rev.symLinkDst);
-            index.appendRevision(system, path, new SymLink() {
-              @Override
-              public Path src() {
-                return path;
-              }
-
-              @Override
-              public Path dst() {
-                return p;
-              }
-            });
+            index.appendRevision(system, path, new SymLink(path, p));
           } else if (rev.hardLinkDst != null) {
             Path p = Paths.get(rev.hardLinkDst);
-            index.appendRevision(system, path, new HardLink() {
-              @Override
-              public Path src() {
-                return path;
-              }
-
-              @Override
-              public Path dst() {
-                return p;
-              }
-            });
+            index.appendRevision(system, path, new HardLink(path, p));
           } else {
             index.appendTombstone(system, path);
           }

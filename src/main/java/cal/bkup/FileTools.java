@@ -54,17 +54,7 @@ public class FileTools {
       if (canonical == null) {
         consumer.accept(f);
       } else {
-        hardLinkConsumer.accept(new HardLink() {
-          @Override
-          public Path src() {
-            return f.path();
-          }
-
-          @Override
-          public Path dst() {
-            return canonical;
-          }
-        });
+        hardLinkConsumer.accept(new HardLink(f.path(), canonical));
       }
     }
 

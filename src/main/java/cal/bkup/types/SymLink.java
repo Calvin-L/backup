@@ -1,4 +1,9 @@
 package cal.bkup.types;
 
-public interface SymLink extends Link {
+import java.nio.file.Path;
+
+public class SymLink extends Link {
+  public SymLink(Path src, Path dst) {
+    super(src, dst);
+  }
 }
