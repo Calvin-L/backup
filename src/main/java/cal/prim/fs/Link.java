@@ -1,36 +1,19 @@
 package cal.prim.fs;
 
+import cal.prim.Pair;
+
 import java.nio.file.Path;
-import java.util.Objects;
 
-public class Link {
-
-  private final Path src, dst;
-
-  public Link(Path src, Path dst) {
-    this.src = src;
-    this.dst = dst;
+public class Link extends Pair<Path, Path> {
+  public Link(Path fst, Path snd) {
+    super(fst, snd);
   }
 
   public Path src() {
-    return src;
+    return fst;
   }
 
   public Path dst() {
-    return dst;
+    return snd;
   }
-
-  @Override
-  public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
-    Link link = (Link) o;
-    return src.equals(link.src) && dst.equals(link.dst);
-  }
-
-  @Override
-  public int hashCode() {
-    return Objects.hash(src, dst);
-  }
-
 }
