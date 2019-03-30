@@ -1,6 +1,5 @@
 package cal.prim;
 
-import cal.bkup.types.IOConsumer;
 import cal.bkup.types.RegularFile;
 import cal.bkup.types.SymLink;
 import jnr.posix.POSIX;

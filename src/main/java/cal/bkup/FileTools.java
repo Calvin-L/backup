@@ -2,7 +2,7 @@ package cal.bkup;
 
 import cal.bkup.types.Config;
 import cal.bkup.types.HardLink;
-import cal.bkup.types.IOConsumer;
+import cal.prim.IOConsumer;
 import cal.bkup.types.RegularFile;
 import cal.bkup.types.Rule;
 import cal.bkup.types.SymLink;

@@ -1,6 +1,6 @@
 package cal.bkup;
 
-import cal.bkup.types.IOConsumer;
+import cal.prim.IOConsumer;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.Price;
 import cal.prim.transforms.StatisticsCollectingInputStream;
