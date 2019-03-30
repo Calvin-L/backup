@@ -2,14 +2,14 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
-import cal.bkup.types.HardLink;
+import cal.prim.fs.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
-import cal.bkup.types.Link;
-import cal.bkup.types.RegularFile;
+import cal.prim.fs.Link;
+import cal.prim.fs.RegularFile;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
-import cal.bkup.types.SymLink;
+import cal.prim.fs.SymLink;
 import cal.prim.ConsistentBlob;
 import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.NoValue;

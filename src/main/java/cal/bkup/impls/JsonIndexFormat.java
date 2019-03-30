@@ -2,11 +2,11 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
-import cal.bkup.types.HardLink;
+import cal.prim.fs.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
-import cal.bkup.types.SymLink;
+import cal.prim.fs.SymLink;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;

@@ -4,7 +4,7 @@ import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.types.Id;
-import cal.bkup.types.RegularFile;
+import cal.prim.fs.RegularFile;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.BlobStoreOnDirectory;
 import cal.prim.ConsistentBlob;

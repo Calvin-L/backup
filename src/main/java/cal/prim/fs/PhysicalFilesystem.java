@@ -1,7 +1,6 @@
-package cal.prim;
+package cal.prim.fs;
 
-import cal.bkup.types.RegularFile;
-import cal.bkup.types.SymLink;
+import cal.prim.IOConsumer;
 import jnr.posix.POSIX;
 import jnr.posix.POSIXFactory;
 

@@ -11,6 +11,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+/**
+ * A <code>StringRegister</code> implementation atop a SQLite database in a local file.
+ */
 public class SQLiteStringRegister implements StringRegister {
 
   private final Connection conn;
@@ -33,7 +36,7 @@ public class SQLiteStringRegister implements StringRegister {
   public String read() throws IOException {
     try (Statement stmt = conn.createStatement()) {
       try (ResultSet rs = stmt.executeQuery("SELECT value FROM tbl LIMIT 1")) {
-        while (rs.next()) {
+        if (rs.next()) {
           return rs.getString(1);
         }
       }

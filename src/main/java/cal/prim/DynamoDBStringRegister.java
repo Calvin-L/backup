@@ -47,22 +47,25 @@ public class DynamoDBStringRegister implements StringRegister {
             .withAttributeDefinitions(attributeDefinitions)
             .withBillingMode(BillingMode.PAY_PER_REQUEST);
 
-    System.out.println("Waiting for DynamoDB table `" + tableName + "`...");
-
+    boolean wasCreated = false;
     Table table;
     try {
       table = client.createTable(request);
+      wasCreated = true;
     } catch (ResourceInUseException ignored) {
       // this happens if the table already exists
       table = client.getTable(tableName);
     }
 
-    while (true) {
-      try {
-        table.waitForActive();
-        break;
-      } catch (InterruptedException ignored) {
-        // ...
+    if (wasCreated) {
+      System.out.println("Waiting for DynamoDB table `" + tableName + "`...");
+      while (true) {
+        try {
+          table.waitForActive();
+          break;
+        } catch (InterruptedException ignored) {
+          // ...
+        }
       }
     }
 

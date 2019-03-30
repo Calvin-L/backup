@@ -1,13 +1,13 @@
 package cal.bkup;
 
 import cal.bkup.types.Config;
-import cal.bkup.types.HardLink;
+import cal.prim.fs.HardLink;
 import cal.prim.IOConsumer;
-import cal.bkup.types.RegularFile;
+import cal.prim.fs.RegularFile;
 import cal.bkup.types.Rule;
-import cal.bkup.types.SymLink;
-import cal.prim.Filesystem;
-import cal.prim.PhysicalFilesystem;
+import cal.prim.fs.SymLink;
+import cal.prim.fs.Filesystem;
+import cal.prim.fs.PhysicalFilesystem;
 
 import java.io.IOException;
 import java.nio.file.Path;

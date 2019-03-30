@@ -3,7 +3,6 @@ package cal.bkup;
 import cal.prim.EventuallyConsistentDirectory;
 import cal.prim.InMemoryDir;
 import cal.prim.transforms.BlobTransformer;
-import cal.prim.transforms.TransformedDirectory;
 import cal.prim.transforms.XZCompression;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -15,11 +14,51 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
 @Test
 public class TestDirectories {
 
   private final Charset CHARSET = StandardCharsets.UTF_8;
+
+  class TransformedDirectory implements EventuallyConsistentDirectory {
+
+    private final EventuallyConsistentDirectory directory;
+    private final BlobTransformer transform;
+
+    /**
+     * Apply the given transformations to data placed in the directory.
+     *
+     * @param directory the directory to wrap
+     * @param transform the transformation to apply
+     * @return
+     */
+    public TransformedDirectory(EventuallyConsistentDirectory directory, BlobTransformer transform) {
+      this.directory = directory;
+      this.transform = transform;
+    }
+
+    @Override
+    public Stream<String> list() throws IOException {
+      return directory.list();
+    }
+
+    @Override
+    public void createOrReplace(String name, InputStream stream) throws IOException {
+      directory.createOrReplace(name, transform.apply(stream));
+    }
+
+    @Override
+    public InputStream open(String name) throws IOException {
+      return transform.unApply(directory.open(name));
+    }
+
+    @Override
+    public void delete(String name) throws IOException {
+      directory.delete(name);
+    }
+
+  }
 
   private void check(EventuallyConsistentDirectory dir) throws IOException {
     String text = "as;gihawpognaw;efe;";
