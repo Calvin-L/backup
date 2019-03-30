@@ -1,1 +1,2 @@
+rootProject.name = "bkup"
 include("crash-safe-io")
