@@ -1,6 +1,8 @@
 package cal.prim;
 
-public final class Pair<A, B> {
+import java.util.Objects;
+
+public class Pair<A, B> {
   public final A fst;
   public final B snd;
 
@@ -14,7 +16,7 @@ public final class Pair<A, B> {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     Pair<?, ?> pair = (Pair<?, ?>) o;
-    return fst != null ? fst.equals(pair.fst) : pair.fst == null && (snd != null ? snd.equals(pair.snd) : pair.snd == null);
+    return Objects.equals(fst, pair.fst) && Objects.equals(snd, pair.snd);
   }
 
   @Override
