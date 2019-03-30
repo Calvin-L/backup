@@ -5,7 +5,7 @@ import cal.prim.fs.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.fs.SymLink;
-import cal.prim.ImmutableSet;
+import com.google.common.collect.ImmutableSet;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -140,12 +140,12 @@ public class BackupIndex {
   }
 
   public synchronized Set<Id> knownSystems() {
-    return new ImmutableSet<>(files.keySet());
+    return ImmutableSet.copyOf(files.keySet());
   }
 
   public synchronized Set<Path> knownPaths(Id system) {
     Map<Path, List<Revision>> info = files.get(system);
-    return info != null ? new ImmutableSet<>(info.keySet()) : Collections.emptySet();
+    return info != null ? ImmutableSet.copyOf(info.keySet()) : Collections.emptySet();
   }
 
   public synchronized List<Revision> getInfo(Id system, Path path) {
