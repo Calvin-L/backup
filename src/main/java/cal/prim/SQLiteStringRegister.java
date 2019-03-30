@@ -10,6 +10,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Objects;
 
 /**
  * A <code>StringRegister</code> implementation atop a SQLite database in a local file.
@@ -48,6 +49,7 @@ public class SQLiteStringRegister implements StringRegister {
 
   @Override
   public void write(String expectedValue, String newValue) throws IOException, PreconditionFailed {
+    Objects.requireNonNull(newValue);
     try (PreparedStatement stmt = conn.prepareStatement("UPDATE tbl SET value=? WHERE value=?")) {
       stmt.setString(1, newValue);
       stmt.setString(2, expectedValue);
