@@ -1,11 +1,14 @@
-.PHONY: all test clean
+.PHONY: all test update-submodules clean
 
 all: test
 	gradle installDist
 	rsync -avz --link-dest=../build/install/bkup build/install/bkup/ dist/
 
-test:
+test: update-submodules
 	gradle test
+
+update-submodules:
+	git submodule update --init
 
 clean:
 	gradle clean
