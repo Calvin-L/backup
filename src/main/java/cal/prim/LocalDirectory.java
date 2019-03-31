@@ -18,7 +18,7 @@ public class LocalDirectory implements EventuallyConsistentDirectory {
   private final Path dir;
 
   public LocalDirectory(Path dir) throws IOException {
-    DurableIOUtil.createFolders(dir);
+    DurableIOUtil.createDirectories(dir);
     this.dir = dir;
   }
 

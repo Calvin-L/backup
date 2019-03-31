@@ -20,7 +20,7 @@ public class SQLiteStringRegister implements StringRegister {
   private final Connection conn;
 
   public SQLiteStringRegister(Path filename) throws SQLException, IOException {
-    DurableIOUtil.createFolders(filename.getParent());
+    DurableIOUtil.createDirectories(filename.getParent());
 
     conn = DriverManager.getConnection("jdbc:sqlite:" + filename.toAbsolutePath());
     conn.setAutoCommit(false);
