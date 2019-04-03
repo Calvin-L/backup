@@ -4,6 +4,8 @@ import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.types.Id;
+import cal.bkup.types.StorageCostModel;
+import cal.prim.Price;
 import cal.prim.fs.RegularFile;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.BlobStoreOnDirectory;
@@ -30,6 +32,18 @@ import java.util.Collections;
 
 @Test
 public class BackupTests {
+
+  private static final StorageCostModel FREE = new StorageCostModel() {
+    @Override
+    public Price costToUploadBlob(long numBytes) {
+      return Price.ZERO;
+    }
+
+    @Override
+    public Price monthlyStorageCostForBlob(long numBytes) {
+      return Price.ZERO;
+    }
+  };
 
   @Test
   public void test() throws IOException, NoValue {
@@ -148,6 +162,100 @@ public class BackupTests {
     backup.list(newPassword).forEach(info -> {
       System.out.println("latest revision for " + info.path() + ": " + info.latestRevision().type);
     });
+
+  }
+
+  @Test
+  public void testMove() throws IOException {
+
+    final Id system = new Id("foobar");
+    final String password = "fizzbuzz";
+
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), new InMemoryDir());
+    final EventuallyConsistentDirectory blobDir = new InMemoryDir();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            new JsonIndexFormat(),
+            new BlobStoreOnDirectory(blobDir),
+            transform);
+
+    RegularFile f = new RegularFile() {
+      @Override
+      public Path path() {
+        return Paths.get("/", "tmp", "file");
+      }
+
+      @Override
+      public Instant modTime() {
+        return Instant.EPOCH;
+      }
+
+      @Override
+      public InputStream open() {
+        byte[] data = new byte[1024];
+        for (int i = 0; i < data.length; ++i) {
+          data[i] = 33;
+        }
+        return new ByteArrayInputStream(data);
+      }
+
+      @Override
+      public long sizeInBytes() {
+        return 1024;
+      }
+
+      @Override
+      public Object inode() {
+        return this;
+      }
+    };
+
+    backup.planBackup(system, password, password, FREE,
+            Collections.singletonList(f),
+            Collections.emptyList(),
+            Collections.emptyList()).execute();
+
+    Assert.assertEquals(blobDir.list().count(), 1L);
+
+    f = new RegularFile() {
+      @Override
+      public Path path() {
+        return Paths.get("/", "foo", "bar");
+      }
+
+      @Override
+      public Instant modTime() {
+        return Instant.EPOCH;
+      }
+
+      @Override
+      public InputStream open() {
+        byte[] data = new byte[1024];
+        for (int i = 0; i < data.length; ++i) {
+          data[i] = 33;
+        }
+        return new ByteArrayInputStream(data);
+      }
+
+      @Override
+      public long sizeInBytes() {
+        return 1024;
+      }
+
+      @Override
+      public Object inode() {
+        return this;
+      }
+    };
+
+    backup.planBackup(system, password, password, FREE,
+            Collections.singletonList(f),
+            Collections.emptyList(),
+            Collections.emptyList()).execute();
+
+    Assert.assertEquals(blobDir.list().count(), 1L);
 
   }
 
