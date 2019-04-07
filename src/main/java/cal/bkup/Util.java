@@ -301,8 +301,10 @@ public abstract class Util {
     return soFar;
   }
 
-  public static void async(Runnable job) {
-    new Thread(job).start();
+  public static Thread async(Runnable job) {
+    Thread t = new Thread(job);
+    t.start();
+    return t;
   }
 
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
