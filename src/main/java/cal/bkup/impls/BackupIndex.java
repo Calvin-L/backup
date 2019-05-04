@@ -165,8 +165,14 @@ public class BackupIndex {
     findOrAddRevisionList(system, path).add(new Revision());
   }
 
-  public BackupIndex merge(BackupIndex other) {
-    throw new UnsupportedOperationException();
+  public static class MergeConflict extends Exception {
+    public MergeConflict(String message) {
+      super(message);
+    }
+  }
+
+  public BackupIndex merge(BackupIndex other) throws MergeConflict {
+    throw new MergeConflict("merge is not implemented yet");
   }
 
 }

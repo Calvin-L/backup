@@ -49,7 +49,7 @@ public class BackupTests {
   };
 
   @Test
-  public void test() throws IOException, NoValue {
+  public void test() throws IOException, NoValue, BackupIndex.MergeConflict {
 
     final Id system = new Id("foobar");
     final String password = "fizzbuzz";
@@ -149,7 +149,7 @@ public class BackupTests {
   }
 
   @Test
-  public void testMove() throws IOException {
+  public void testMove() throws IOException, BackupIndex.MergeConflict {
 
     final Id system = new Id("foobar");
     final String password = "fizzbuzz";
@@ -253,7 +253,7 @@ public class BackupTests {
   }
 
   @Test(enabled = false)
-  public void testConcurrentBackup() throws IOException, InterruptedException {
+  public void testConcurrentBackup() throws IOException, InterruptedException, BackupIndex.MergeConflict {
 
     final Id systemA = new Id("foobar");
     final Id systemB = new Id("barfoo");
@@ -307,7 +307,7 @@ public class BackupTests {
                 Collections.singletonList(f),
                 Collections.emptyList(),
                 Collections.emptyList()).execute();
-      } catch (IOException e) {
+      } catch (IOException | BackupIndex.MergeConflict e) {
         throw new RuntimeException(e);
       }
     });

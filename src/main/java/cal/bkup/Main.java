@@ -52,6 +52,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -105,7 +106,7 @@ public class Main {
     new HelpFormatter().printHelp("backup [options]", options);
   }
 
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] args) throws IOException {
     Options options = new Options();
 
     // flags
@@ -174,7 +175,15 @@ public class Main {
     final BackerUpper backupper;
 
     if (local) {
-      StringRegister register = new SQLiteStringRegister(Paths.get("/tmp/backup/register.db"));
+      var registerLocation = Paths.get("/tmp/backup/register.db");
+      StringRegister register = null;
+      try {
+        register = new SQLiteStringRegister(registerLocation);
+      } catch (SQLException e) {
+        System.err.println("Failed to create SQLiteStringRegister at " + registerLocation);
+        e.printStackTrace();
+        System.exit(1);
+      }
       EventuallyConsistentDirectory dir = new LocalDirectory(Paths.get("/tmp/backup/indexes"));
       ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
       EventuallyConsistentBlobStore blobStore = new BlobStoreOnDirectory(new LocalDirectory(Paths.get("/tmp/backup/blobs")));
@@ -230,7 +239,14 @@ public class Main {
       System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
       System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
       if (!dryRun && confirm("Proceed?")) {
-        plan.execute();
+        try {
+          plan.execute();
+        } catch (BackupIndex.MergeConflict mergeConflict) {
+          System.err.println("Another concurrent backup interfered with this one!");
+          System.err.println("Error message: " + mergeConflict.getMessage());
+          System.err.println("Wait for the other backup to finish, and run the backup again.");
+          System.exit(1);
+        }
       }
     }
 

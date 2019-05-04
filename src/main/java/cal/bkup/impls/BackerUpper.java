@@ -9,6 +9,7 @@ import cal.bkup.types.StorageCostModel;
 import cal.prim.ConsistentBlob;
 import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.NoValue;
+import cal.prim.Pair;
 import cal.prim.PreconditionFailed;
 import cal.prim.Price;
 import cal.prim.fs.HardLink;
@@ -28,7 +29,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -72,7 +72,7 @@ public class BackerUpper {
     long estimatedBytesUploaded();
     Price estimatedExecutionCost();
     Price estimatedMonthlyCost();
-    void execute() throws IOException;
+    void execute() throws IOException, BackupIndex.MergeConflict;
   }
 
   public BackupPlan planBackup(
@@ -142,14 +142,14 @@ public class BackerUpper {
       }
 
       @Override
-      public void execute() throws IOException {
+      public void execute() throws IOException, BackupIndex.MergeConflict {
         backup(whatSystemIsThis, passwordForIndex, newPasswordForIndex, filteredFiles, symlinks, hardlinks, toForget);
       }
     };
 
   }
 
-  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException {
+  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
 
     List<String> warnings = new ArrayList<>();
 
@@ -158,6 +158,7 @@ public class BackerUpper {
     final AtomicBoolean keepRunning = new AtomicBoolean(true);
     final Thread backupThread = Thread.currentThread();
     Thread shutdownHook = new Thread(() -> {
+      System.err.println("Stopping...");
       keepRunning.set(false);
       for (;;) {
         try {
@@ -172,94 +173,66 @@ public class BackerUpper {
     Runtime runtime = Runtime.getRuntime();
     runtime.addShutdownHook(shutdownHook);
 
+    String currentPassword = passwordForIndex;
     try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
-      String currentPassword = passwordForIndex;
       loadIndexIfMissing(currentPassword);
 
-      Iterator<RegularFile> it = files.iterator();
-      Iterator<SymLink> symLinkIterator = symlinks.iterator();
-      Iterator<HardLink> hardLinkIterator = hardlinks.iterator();
+      Instant lastIndexSave = Instant.now();
 
-      for (; ; ) {
-        try {
-          Instant lastIndexSave = Instant.now();
-
-          try {
-            while (it.hasNext()) {
-              if (!keepRunning.get()) {
-                return;
-              }
-              RegularFile f = it.next();
-              try {
-                uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
-              } catch (NoSuchFileException ignored) {
-                warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
-              }
-              Instant now = Instant.now();
-              if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
-                saveIndex(newPasswordForIndex);
-                currentPassword = newPasswordForIndex;
-                lastIndexSave = now;
-              }
-            }
-
-            while (symLinkIterator.hasNext()) {
-              SymLink link = symLinkIterator.next();
-              ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
-              BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
-              if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
-                progress.finishTask(task);
-                continue;
-              }
-              index.appendRevision(whatSystemIsThis, link.getSource(), link);
-              progress.finishTask(task);
-            }
-
-            while (hardLinkIterator.hasNext()) {
-              HardLink link = hardLinkIterator.next();
-              ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.getSource() + " --> " + link.getDestination());
-              BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
-              if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
-                progress.finishTask(task);
-                continue;
-              }
-              index.appendRevision(whatSystemIsThis, link.getSource(), link);
-              progress.finishTask(task);
-            }
-
-            for (Path p : toForget) {
-              index.appendTombstone(whatSystemIsThis, p);
-            }
-          } finally {
-            try {
-              saveIndex(newPasswordForIndex);
-            } finally {
-              if (warnings.size() > 0) {
-                System.out.println(warnings.size() + " warnings:");
-                for (String w : warnings) {
-                  System.out.print(" - ");
-                  System.out.println(w);
-                }
-              }
-            }
-          }
-
+      for (var f : files) {
+        if (!keepRunning.get()) {
           return;
-        } catch (PreconditionFailed e) {
-          System.out.println("Checkpoint failed due to " + e);
-          System.out.println("This probably happened because another process modified the");
-          System.out.println("checkpoint while this process was running.  This process will");
-          System.out.println("reload the checkpoint, merge its progress, and try again...");
-
-          BackupIndex myIndex = index;
-          forceReloadIndex(currentPassword);
-          index = index.merge(myIndex);
-
-          // No need to reset the iterators!
-          // The files that were backed up have been merged into the index.
+        }
+        try {
+          uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
+        } catch (NoSuchFileException ignored) {
+          warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
+        }
+        Instant now = Instant.now();
+        if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
+          saveIndex(currentPassword, newPasswordForIndex);
+          currentPassword = newPasswordForIndex;
+          lastIndexSave = now;
         }
       }
+
+      for (var link : symlinks) {
+        ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
+        BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
+        if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
+          progress.finishTask(task);
+          continue;
+        }
+        index.appendRevision(whatSystemIsThis, link.getSource(), link);
+        progress.finishTask(task);
+      }
+
+      for (var link : hardlinks) {
+        ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.getSource() + " --> " + link.getDestination());
+        BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
+        if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
+          progress.finishTask(task);
+          continue;
+        }
+        index.appendRevision(whatSystemIsThis, link.getSource(), link);
+        progress.finishTask(task);
+      }
+
+      for (Path p : toForget) {
+        index.appendTombstone(whatSystemIsThis, p);
+      }
     } finally {
+      try {
+        saveIndex(currentPassword, newPasswordForIndex);
+      } finally {
+        if (warnings.size() > 0) {
+          System.out.println(warnings.size() + " warnings:");
+          for (String w : warnings) {
+            System.out.print(" - ");
+            System.out.println(w);
+          }
+        }
+      }
       try {
         runtime.removeShutdownHook(shutdownHook);
       } catch (IllegalStateException ignored) {
@@ -386,28 +359,58 @@ public class BackerUpper {
   // -------------------------------------------------------------------------
   // Helpers for managing the index
 
-  private void forceReloadIndex(String password) throws IOException {
-    tagForLastIndexLoad = indexStore.head();
-    System.out.println("Reading index " + tagForLastIndexLoad + "...");
-    try (InputStream in = transformer.followedBy(new Encryption(password)).unApply(indexStore.read(tagForLastIndexLoad))) {
+  private Pair<ConsistentBlob.Tag, BackupIndex> readLatestFromIndexStore(String password) throws IOException {
+    var tag = indexStore.head();
+    BackupIndex index;
+    System.out.println("Reading index " + tag + "...");
+    try (InputStream in = transformer.followedBy(new Encryption(password)).unApply(indexStore.read(tag))) {
       index = indexFormat.load(in);
       System.out.println(" *** read index");
     } catch (NoValue noValue) {
       System.out.println("No index was found; creating a new one");
       index = new BackupIndex();
     }
+    return new Pair<>(tag, index);
   }
 
   private void loadIndexIfMissing(String password) throws IOException {
     if (index == null) {
-      forceReloadIndex(password);
+      var tagAndIndex = readLatestFromIndexStore(password);
+      tagForLastIndexLoad = tagAndIndex.getFst();
+      index = tagAndIndex.getSnd();
     }
   }
 
-  private void saveIndex(String password) throws IOException, PreconditionFailed {
+  /**
+   * Commit the contents of {@link #index} to {@link #indexStore}.
+   * If another process has modified the index stored in {@link #indexStore},
+   * this method will download it, merge the other process's
+   * modifications with this one, and try again.
+   *
+   * @param currentPassword the old password, used if the index needs to be downloaded
+   * @param newPassword the password to encrypt the index
+   * @throws IOException
+   * @throws cal.bkup.impls.BackupIndex.MergeConflict if another process modified the index, but the changes
+   *         cannot be merged with the changes made by this process
+   */
+  private void saveIndex(String currentPassword, String newPassword) throws IOException, BackupIndex.MergeConflict {
     System.out.println("Saving index...");
-    try (InputStream bytes = transformer.followedBy(new Encryption(password)).apply(indexFormat.serialize(index))) {
-      tagForLastIndexLoad = indexStore.write(tagForLastIndexLoad, bytes);
+    for (;;) {
+      PreconditionFailed failure;
+      try (InputStream bytes = transformer.followedBy(new Encryption(newPassword)).apply(indexFormat.serialize(index))) {
+        tagForLastIndexLoad = indexStore.write(tagForLastIndexLoad, bytes);
+        return;
+      } catch (PreconditionFailed exn) {
+        failure = exn;
+      }
+
+      System.out.println("Checkpoint failed due to " + failure);
+      System.out.println("This probably happened because another process modified the");
+      System.out.println("checkpoint while this process was running.  This process will");
+      System.out.println("reload the checkpoint, merge its progress, and try again...");
+      var latest = readLatestFromIndexStore(currentPassword);
+      index = index.merge(latest.getSnd());
+      tagForLastIndexLoad = latest.getFst();
     }
   }
 
