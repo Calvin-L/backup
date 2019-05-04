@@ -152,92 +152,72 @@ public class BackerUpper {
   public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
 
     List<String> warnings = new ArrayList<>();
-
-    // Source of this trick:
-    // https://stackoverflow.com/a/2922031/784284
     final AtomicBoolean keepRunning = new AtomicBoolean(true);
-    final Thread backupThread = Thread.currentThread();
-    Thread shutdownHook = new Thread(() -> {
-      System.err.println("Stopping...");
-      keepRunning.set(false);
-      for (;;) {
-        try {
-          backupThread.join();
-          return;
-        } catch (InterruptedException ignored) {
-          System.err.println("Ignoring interrupt...");
-        }
-      }
-    });
-
-    Runtime runtime = Runtime.getRuntime();
-    runtime.addShutdownHook(shutdownHook);
 
     String currentPassword = passwordForIndex;
-    try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
-      loadIndexIfMissing(currentPassword);
+    try (var ignored1 = Util.catchShutdown(() -> {
+      System.err.println("Shutting down...");
+      keepRunning.set(false);
+    })) {
+      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
+        loadIndexIfMissing(currentPassword);
 
-      Instant lastIndexSave = Instant.now();
+        Instant lastIndexSave = Instant.now();
 
-      for (var f : files) {
-        if (!keepRunning.get()) {
-          return;
-        }
-        try {
-          uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
-        } catch (NoSuchFileException ignored) {
-          warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
-        }
-        Instant now = Instant.now();
-        if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
-          saveIndex(currentPassword, newPasswordForIndex);
-          currentPassword = newPasswordForIndex;
-          lastIndexSave = now;
-        }
-      }
-
-      for (var link : symlinks) {
-        ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
-        BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
-        if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
-          progress.finishTask(task);
-          continue;
-        }
-        index.appendRevision(whatSystemIsThis, link.getSource(), link);
-        progress.finishTask(task);
-      }
-
-      for (var link : hardlinks) {
-        ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.getSource() + " --> " + link.getDestination());
-        BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
-        if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
-          progress.finishTask(task);
-          continue;
-        }
-        index.appendRevision(whatSystemIsThis, link.getSource(), link);
-        progress.finishTask(task);
-      }
-
-      for (Path p : toForget) {
-        index.appendTombstone(whatSystemIsThis, p);
-      }
-    } finally {
-      try {
-        saveIndex(currentPassword, newPasswordForIndex);
-      } finally {
-        if (warnings.size() > 0) {
-          System.out.println(warnings.size() + " warnings:");
-          for (String w : warnings) {
-            System.out.print(" - ");
-            System.out.println(w);
+        for (var f : files) {
+          if (!keepRunning.get()) {
+            return;
+          }
+          try {
+            uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
+          } catch (NoSuchFileException ignored2) {
+            warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
+          }
+          Instant now = Instant.now();
+          if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
+            saveIndex(currentPassword, newPasswordForIndex);
+            currentPassword = newPasswordForIndex;
+            lastIndexSave = now;
           }
         }
-      }
-      try {
-        runtime.removeShutdownHook(shutdownHook);
-      } catch (IllegalStateException ignored) {
-        // This happens if the JVM is shutting down, in which case our hook
-        // is already committed to running and removing it won't matter.
+
+        for (var link : symlinks) {
+          ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
+          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
+          if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
+            progress.finishTask(task);
+            continue;
+          }
+          index.appendRevision(whatSystemIsThis, link.getSource(), link);
+          progress.finishTask(task);
+        }
+
+        for (var link : hardlinks) {
+          ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.getSource() + " --> " + link.getDestination());
+          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
+          if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
+            progress.finishTask(task);
+            continue;
+          }
+          index.appendRevision(whatSystemIsThis, link.getSource(), link);
+          progress.finishTask(task);
+        }
+
+        for (Path p : toForget) {
+          index.appendTombstone(whatSystemIsThis, p);
+        }
+      } finally {
+        try {
+          saveIndex(currentPassword, newPasswordForIndex);
+        } finally {
+          if (warnings.size() > 0) {
+            System.out.println(warnings.size() + " warnings:");
+            for (String w : warnings) {
+              System.out.print(" - ");
+              System.out.println(w);
+            }
+          }
+        }
       }
     }
   }

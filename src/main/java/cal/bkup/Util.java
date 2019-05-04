@@ -2,6 +2,7 @@ package cal.bkup;
 
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.IOConsumer;
+import cal.prim.QuietAutoCloseable;
 import cal.prim.transforms.StatisticsCollectingInputStream;
 
 import java.io.BufferedInputStream;
@@ -294,6 +295,56 @@ public abstract class Util {
     Thread t = new Thread(job);
     t.start();
     return t;
+  }
+
+  /**
+   * Prevent the current thread from stopping during a JVM shutdown.
+   * One common source of shutdowns is the Unix <code>SIGINT</code> signal that is
+   * sent when a console user presses Ctrl+C.
+   *
+   * <p>Note that this method does not prevent all possible causes of process
+   * termination; for instance, the <code>SIGKILL</code> signal cannot be prevented.
+   *
+   * <p>Sample usage for this method:
+   *
+   * <pre>
+   *   Runnable onShutdown = () -> { System.err.println("Ignoring shutdown..."); };
+   *   try (Util.catchShutdown(onShutdown)) {
+   *     // work uninterrupted
+   *   }
+   *   // normal shutdowns are possible again out here
+   * </pre>
+   *
+   * @param onShutdown a hook that is run when a shutdown would have occurred
+   * @return an object whose {@link QuietAutoCloseable#close() close method} re-enables normal shutdown
+   */
+  public static QuietAutoCloseable catchShutdown(Runnable onShutdown) {
+    // Source of this trick:
+    // https://stackoverflow.com/a/2922031/784284
+
+    final var unstoppableThread = Thread.currentThread();
+    final var runtime = Runtime.getRuntime();
+    final var shutdownHook = new Thread(() -> {
+      onShutdown.run();
+      for (;;) {
+        try {
+          unstoppableThread.join();
+          return;
+        } catch (InterruptedException ignored) {
+          System.err.println("Ignoring interrupt...");
+        }
+      }
+    });
+
+    runtime.addShutdownHook(shutdownHook);
+    return () -> {
+      try {
+        runtime.removeShutdownHook(shutdownHook);
+      } catch (IllegalStateException ignored) {
+        // This happens if the JVM is shutting down, in which case our hook
+        // is already committed to running and removing it won't matter.
+      }
+    };
   }
 
   private static final SecureRandom SECURE_RANDOM = new SecureRandom();
