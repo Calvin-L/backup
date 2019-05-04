@@ -1,9 +1,12 @@
-apply plugin: "java"
+plugins {
+    id "java"
+    id "application"
+}
+
 sourceCompatibility = 1.8
 version = "1.0"
 
 ////////////////////////// Application setup
-apply plugin: "application"
 mainClassName = "cal.bkup.Main"
 jar {
     manifest {
