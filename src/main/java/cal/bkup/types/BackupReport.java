@@ -1,18 +1,32 @@
 package cal.bkup.types;
 
-public interface BackupReport {
+import lombok.NonNull;
+import lombok.Value;
+
+/**
+ * Information about a backed-up file.
+ *
+ * @see cal.bkup.impls.BackupIndex#addBackedUpBlob(Sha256AndSize, String, BackupReport)
+ * @see cal.bkup.impls.BackupIndex#lookupBlob(Sha256AndSize)
+ */
+@Value
+public class BackupReport {
   /**
-   * @return the identifier assigned to the resource by the target
+   * The identifier for the file contents in the target store.
    */
-  Id idAtTarget();
+  @NonNull Id idAtTarget;
 
   /**
-   * Determine how many bytes were actually stored.
+   * The number of bytes stored by the backup target to contain the data.
    * The backup target might perform transformations on the data
    * (such as compression or encryption).
    * This method determines how many bytes were actually stored AFTER
    * transformations.
-   * @return the number of bytes stored by the backup target to contain the data
    */
-  long sizeAtTarget();
+  long sizeAtTarget;
+
+  /**
+   * The key that encrypts the data in the target store.
+   */
+  @NonNull String key;
 }

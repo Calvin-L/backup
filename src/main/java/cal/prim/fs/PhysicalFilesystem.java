@@ -4,13 +4,10 @@ import cal.prim.IOConsumer;
 import jnr.posix.POSIX;
 import jnr.posix.POSIXFactory;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -31,42 +28,7 @@ public class PhysicalFilesystem implements Filesystem {
         long size = attrs.size();
         Instant modTime = attrs.lastModifiedTime().toInstant();
         Object inode = Objects.requireNonNull(attrs.fileKey());
-
-        onFile.accept(new RegularFile() {
-          @Override
-          public Path path() {
-            return path;
-          }
-
-          @Override
-          public Instant modTime() {
-            return modTime;
-          }
-
-          @Override
-          public InputStream open() throws IOException {
-            try {
-              return Files.newInputStream(path);
-            } catch (FileNotFoundException e) {
-              // The JavaDoc for Files.newInputStream() does not specify which of the standard
-              // library's two "file is missing" exceptions get thrown.  Since it belongs to the
-              // `java.nio` package I suspect it will always throw NoSuchFileException, but just
-              // in case, this block catches the other one and re-throws it as the one specified
-              // by the JavaDoc contract for RegularFile.open().
-              throw new NoSuchFileException(path.toString());
-            }
-          }
-
-          @Override
-          public long sizeInBytes() {
-            return size;
-          }
-
-          @Override
-          public Object inode() {
-            return inode;
-          }
-        });
+        onFile.accept(new RegularFile(path, modTime, size, inode));
       }
 
       @Override

@@ -64,17 +64,7 @@ public class BackupTests {
             new BlobStoreOnDirectory(blobDir),
             transform);
 
-    RegularFile f = new RegularFile() {
-      @Override
-      public Path path() {
-        return Paths.get("/", "tmp", "file");
-      }
-
-      @Override
-      public Instant modTime() {
-        return Instant.EPOCH;
-      }
-
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
       @Override
       public InputStream open() {
         byte[] data = new byte[1024];
@@ -82,16 +72,6 @@ public class BackupTests {
           data[i] = 33;
         }
         return new ByteArrayInputStream(data);
-      }
-
-      @Override
-      public long sizeInBytes() {
-        return 1024;
-      }
-
-      @Override
-      public Object inode() {
-        return this;
       }
     };
 
@@ -103,7 +83,7 @@ public class BackupTests {
     // blob compression should work
     try (InputStream s = blobDir.open(blobDir.list().findAny().get())) {
       long size = Util.drain(s);
-      Assert.assertTrue(size < f.sizeInBytes(), "allegedly-compressed size(" + size + ") is not less than original(" + f.sizeInBytes() + ')');
+      Assert.assertTrue(size < f.getSizeInBytes(), "allegedly-compressed size(" + size + ") is not less than original(" + f.getSizeInBytes() + ')');
     }
 
     // blob encryption should work
@@ -129,7 +109,7 @@ public class BackupTests {
 
     Assert.assertEquals(other.list(password).count(), 1L);
     other.list(password).forEach(info -> {
-      Assert.assertEquals(info.path(), f.path());
+      Assert.assertEquals(info.path(), f.getPath());
       Assert.assertEquals(info.latestRevision().type, BackupIndex.FileType.REGULAR_FILE);
       Assert.assertEquals(info.latestRevision().summary, summary);
     });
@@ -148,7 +128,7 @@ public class BackupTests {
     Assert.assertEquals(blobDir.list().count(), 1L);
 
     // backup without `f`
-    other.backup(system, newPassword, newPassword, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.singleton(f.path()));
+    other.backup(system, newPassword, newPassword, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.singleton(f.getPath()));
 
     // assert empty
     other.list(newPassword).forEach(info -> {
@@ -184,17 +164,8 @@ public class BackupTests {
             new BlobStoreOnDirectory(blobDir),
             transform);
 
-    RegularFile f = new RegularFile() {
-      @Override
-      public Path path() {
-        return Paths.get("/", "tmp", "file");
-      }
-
-      @Override
-      public Instant modTime() {
-        return Instant.EPOCH;
-      }
-
+    Object inode1 = new Object();
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, inode1) {
       @Override
       public InputStream open() {
         byte[] data = new byte[1024];
@@ -202,16 +173,6 @@ public class BackupTests {
           data[i] = 33;
         }
         return new ByteArrayInputStream(data);
-      }
-
-      @Override
-      public long sizeInBytes() {
-        return 1024;
-      }
-
-      @Override
-      public Object inode() {
-        return this;
       }
     };
 
@@ -222,17 +183,8 @@ public class BackupTests {
 
     Assert.assertEquals(blobDir.list().count(), 1L);
 
-    f = new RegularFile() {
-      @Override
-      public Path path() {
-        return Paths.get("/", "foo", "bar");
-      }
-
-      @Override
-      public Instant modTime() {
-        return Instant.EPOCH;
-      }
-
+    Object inode2 = new Object();
+    f = new RegularFile(Paths.get("/", "foo", "bar"), f.getModTime(), f.getSizeInBytes(), inode2) {
       @Override
       public InputStream open() {
         byte[] data = new byte[1024];
@@ -240,16 +192,6 @@ public class BackupTests {
           data[i] = 33;
         }
         return new ByteArrayInputStream(data);
-      }
-
-      @Override
-      public long sizeInBytes() {
-        return 1024;
-      }
-
-      @Override
-      public Object inode() {
-        return this;
       }
     };
 
@@ -336,17 +278,7 @@ public class BackupTests {
             new BlobStoreOnDirectory(blobDir),
             transform);
 
-    RegularFile f = new RegularFile() {
-      @Override
-      public Path path() {
-        return Paths.get("/", "tmp", "file");
-      }
-
-      @Override
-      public Instant modTime() {
-        return Instant.EPOCH;
-      }
-
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
       @Override
       public InputStream open() {
         byte[] data = new byte[1024];
@@ -355,29 +287,9 @@ public class BackupTests {
         }
         return new ByteArrayInputStream(data);
       }
-
-      @Override
-      public long sizeInBytes() {
-        return 1024;
-      }
-
-      @Override
-      public Object inode() {
-        return this;
-      }
     };
 
-    RegularFile g = new RegularFile() {
-      @Override
-      public Path path() {
-        return Paths.get("/", "tmp", "file");
-      }
-
-      @Override
-      public Instant modTime() {
-        return Instant.EPOCH;
-      }
-
+    RegularFile g = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
       @Override
       public InputStream open() {
         byte[] data = new byte[1024];
@@ -385,16 +297,6 @@ public class BackupTests {
           data[i] = 42;
         }
         return new ByteArrayInputStream(data);
-      }
-
-      @Override
-      public long sizeInBytes() {
-        return 1024;
-      }
-
-      @Override
-      public Object inode() {
-        return this;
       }
     };
 

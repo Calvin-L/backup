@@ -1,6 +1,7 @@
 plugins {
     id "java"
     id "application"
+    id "io.freefair.lombok" version "3.2.1"
 }
 
 sourceCompatibility = 1.8

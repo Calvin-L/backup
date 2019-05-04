@@ -257,14 +257,14 @@ public class Main {
       List<Sha256AndSize> remoteSummaries = new ArrayList<>();
       try (ProgressDisplay display = new ProgressDisplay(len)) {
         for (int i = 0; i < len; ++i) {
-          Path path = candidates.get(i).fst;
+          Path path = candidates.get(i).getFst();
           ProgressDisplay.Task t = display.startTask("fetch " + path);
           try (InputStream in = Util.buffered(Files.newInputStream(path))) {
             localSummaries.add(Util.summarize(in, s -> { }));
           }
-          Sha256AndSize thing = candidates.get(i).snd;
+          Sha256AndSize thing = candidates.get(i).getSnd();
           try (InputStream in = Util.buffered(backupper.restore(newPassword, thing))) {
-            remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.size())));
+            remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.getSize())));
           }
           display.finishTask(t);
         }
@@ -272,7 +272,7 @@ public class Main {
 
       boolean ok = true;
       for (int i = 0; i < len; ++i) {
-        System.out.print(candidates.get(i).fst + ": ");
+        System.out.print(candidates.get(i).getFst() + ": ");
         if (localSummaries.get(i).equals(remoteSummaries.get(i))) {
           System.out.println("OK");
         } else {

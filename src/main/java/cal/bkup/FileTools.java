@@ -31,7 +31,7 @@ public class FileTools {
 
     // It is important that this is a sorted set.  This
     // gives us deterministic hard link detection.
-    SortedSet<RegularFile> regularFiles = new TreeSet<>(Comparator.comparing(RegularFile::path));
+    SortedSet<RegularFile> regularFiles = new TreeSet<>(Comparator.comparing(RegularFile::getPath));
 
     // (1) scan the filesystem
     for (int i = rules.size() - 1; i >= 0; --i) {
@@ -50,11 +50,11 @@ public class FileTools {
     // (2) hardlink detection
     Map<Object, Path> canonicalPathForEachInode = new HashMap<>();
     for (RegularFile f : regularFiles) {
-      Path canonical = canonicalPathForEachInode.putIfAbsent(f.inode(), f.path());
+      Path canonical = canonicalPathForEachInode.putIfAbsent(f.getINode(), f.getPath());
       if (canonical == null) {
         consumer.accept(f);
       } else {
-        hardLinkConsumer.accept(new HardLink(f.path(), canonical));
+        hardLinkConsumer.accept(new HardLink(f.getPath(), canonical));
       }
     }
 

@@ -52,17 +52,9 @@ public class JsonIndexFormat implements IndexFormat {
     Format f = mapper.readValue(data, Format.class);
     BackupIndex index = new BackupIndex();
     for (JsonBlob blob : f.blobs) {
-      index.addBackedUpBlob(new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size), blob.key, new BackupReport() {
-        @Override
-        public Id idAtTarget() {
-          return new Id(blob.backupId);
-        }
-
-        @Override
-        public long sizeAtTarget() {
-          return blob.backupSize;
-        }
-      });
+      index.addBackedUpBlob(
+              new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size),
+              new BackupReport(new Id(blob.backupId), blob.backupSize, blob.key));
     }
     for (Map.Entry<String, Map<String, List<Revision>>> entry : f.files.entrySet()) {
       Id system = new Id(entry.getKey());
@@ -92,13 +84,13 @@ public class JsonIndexFormat implements IndexFormat {
 
     index.listBlobs().forEach(b -> {
       JsonBlob blob = new JsonBlob();
-      BackupIndex.BackupReportAndKey report = index.lookupBlob(b);
+      BackupReport report = index.lookupBlob(b);
       assert report != null;
-      blob.key = report.key;
-      blob.sha256 = Util.sha256toString(b.sha256());
-      blob.size = b.size();
-      blob.backupId = report.idAtTarget().toString();
-      blob.backupSize = report.sizeAtTarget();
+      blob.key = report.getKey();
+      blob.sha256 = Util.sha256toString(b.getSha256());
+      blob.size = b.getSize();
+      blob.backupId = report.getIdAtTarget().toString();
+      blob.backupSize = report.getSizeAtTarget();
       result.blobs.add(blob);
     });
 
@@ -120,8 +112,8 @@ public class JsonIndexFormat implements IndexFormat {
     switch (r.type) {
       case REGULAR_FILE:
         res.modTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(r.modTime.toEpochMilli());
-        res.sha256 = Util.sha256toString(r.summary.sha256());
-        res.size = r.summary.size();
+        res.sha256 = Util.sha256toString(r.summary.getSha256());
+        res.size = r.summary.getSize();
         break;
       case SOFT_LINK:
         res.symLinkDst = r.linkTarget.toString();

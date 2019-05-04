@@ -2,19 +2,19 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
-import cal.prim.fs.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
-import cal.prim.fs.Link;
-import cal.prim.fs.RegularFile;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
-import cal.prim.fs.SymLink;
 import cal.prim.ConsistentBlob;
 import cal.prim.EventuallyConsistentBlobStore;
 import cal.prim.NoValue;
 import cal.prim.PreconditionFailed;
 import cal.prim.Price;
+import cal.prim.fs.HardLink;
+import cal.prim.fs.Link;
+import cal.prim.fs.RegularFile;
+import cal.prim.fs.SymLink;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.Encryption;
 import cal.prim.transforms.StatisticsCollectingInputStream;
@@ -94,12 +94,12 @@ public class BackerUpper {
     Set<Path> inThisBackup = new HashSet<>();
 
     for (RegularFile f : files) {
-      inThisBackup.add(f.path());
-      BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.path());
+      inThisBackup.add(f.getPath());
+      BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.getPath());
       Instant lastModTime = (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE) ? latest.modTime : null;
-      if (!Objects.equals(lastModTime, f.modTime())) {
-        System.out.println(" --> " + f.path() + " [" + lastModTime + " --> " + f.modTime() + ']');
-        long size = f.sizeInBytes();
+      if (!Objects.equals(lastModTime, f.getModTime())) {
+        System.out.println(" --> " + f.getPath() + " [" + lastModTime + " --> " + f.getModTime() + ']');
+        long size = f.getSizeInBytes();
         bytesUploaded += size;
         totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
         monthlyStorageCost = monthlyStorageCost.plus(blobStorageCosts.monthlyStorageCostForBlob(size));
@@ -108,11 +108,11 @@ public class BackerUpper {
     }
 
     for (Link l : symlinks) {
-      inThisBackup.add(l.src());
+      inThisBackup.add(l.getSource());
     }
 
     for (Link l : hardlinks) {
-      inThisBackup.add(l.src());
+      inThisBackup.add(l.getSource());
     }
 
     for (Path p : index.knownPaths(whatSystemIsThis)) {
@@ -193,7 +193,7 @@ public class BackerUpper {
               try {
                 uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
               } catch (NoSuchFileException ignored) {
-                warnings.add("The file " + f.path() + " was deleted before it could be backed up");
+                warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
               }
               Instant now = Instant.now();
               if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
@@ -205,25 +205,25 @@ public class BackerUpper {
 
             while (symLinkIterator.hasNext()) {
               SymLink link = symLinkIterator.next();
-              ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.src() + " --> " + link.dst());
-              BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
-              if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.dst())) {
+              ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
+              BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
+              if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
                 progress.finishTask(task);
                 continue;
               }
-              index.appendRevision(whatSystemIsThis, link.src(), link);
+              index.appendRevision(whatSystemIsThis, link.getSource(), link);
               progress.finishTask(task);
             }
 
             while (hardLinkIterator.hasNext()) {
               HardLink link = hardLinkIterator.next();
-              ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.src() + " --> " + link.dst());
-              BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.src());
-              if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.dst())) {
+              ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.getSource() + " --> " + link.getDestination());
+              BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
+              if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
                 progress.finishTask(task);
                 continue;
               }
-              index.appendRevision(whatSystemIsThis, link.src(), link);
+              index.appendRevision(whatSystemIsThis, link.getSource(), link);
               progress.finishTask(task);
             }
 
@@ -303,11 +303,11 @@ public class BackerUpper {
 
   public InputStream restore(String indexPassword, Sha256AndSize blob) throws IOException {
     loadIndexIfMissing(indexPassword);
-    BackupIndex.BackupReportAndKey report = index.lookupBlob(blob);
+    BackupReport report = index.lookupBlob(blob);
     if (report == null) {
       throw new NoSuchElementException();
     }
-    return transformer.followedBy(new Encryption(report.key)).unApply(blobStore.open(report.idAtTarget().toString()));
+    return transformer.followedBy(new Encryption(report.getKey())).unApply(blobStore.open(report.getIdAtTarget().toString()));
   }
 
   public void cleanup() throws IOException {
@@ -335,14 +335,14 @@ public class BackerUpper {
     // we might miss a new revision of the file on a future backup.
     // This could happen if the file changes after computing the
     // checksum but before reading the modification time.
-    Instant modTime = f.modTime();
+    Instant modTime = f.getModTime();
 
     // (2) Checksum the path.
-    ProgressDisplay.Task checksumTask = display.startTask("checksum " + f.path());
+    ProgressDisplay.Task checksumTask = display.startTask("checksum " + f.getPath());
     Sha256AndSize summary;
     try (InputStream in = Util.buffered(f.open())) {
       summary = Util.summarize(in, stream -> {
-        display.reportProgress(checksumTask, stream.getBytesRead(), f.sizeInBytes());
+        display.reportProgress(checksumTask, stream.getBytesRead(), f.getSizeInBytes());
       });
     } finally {
       display.finishTask(checksumTask);
@@ -352,12 +352,12 @@ public class BackerUpper {
     BackupReport report = index.lookupBlob(summary);
 
     // (4) Not known?  Upload it!
-    String uploadDescription = "upload " + f.path();
+    String uploadDescription = "upload " + f.getPath();
     if (report == null) {
       ProgressDisplay.Task task = display.startTask(uploadDescription);
       String key = Util.randomPassword();
       Consumer<StatisticsCollectingInputStream> reportProgress = s -> {
-        display.reportProgress(task, s.getBytesRead(), f.sizeInBytes());
+        display.reportProgress(task, s.getBytesRead(), f.getSizeInBytes());
       };
       Id identifier;
       long sizeAtTarget;
@@ -372,25 +372,15 @@ public class BackerUpper {
       assert in.isClosed();
       long size = in.getBytesRead();
       byte[] sha256 = in.getSha256Digest();
-      report = new BackupReport() {
-        @Override
-        public Id idAtTarget() {
-          return identifier;
-        }
-
-        @Override
-        public long sizeAtTarget() {
-          return sizeAtTarget;
-        }
-      };
+      report = new BackupReport(identifier, sizeAtTarget, key);
       summary = new Sha256AndSize(sha256, size);
-      index.addBackedUpBlob(summary, key, report);
+      index.addBackedUpBlob(summary, report);
     } else {
       display.skipTask(uploadDescription);
     }
 
     // Record the latest details.
-    index.appendRevision(systemId, f.path(), modTime, summary);
+    index.appendRevision(systemId, f.getPath(), modTime, summary);
   }
 
   // -------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.BackupReport;
-import cal.prim.fs.HardLink;
 import cal.bkup.types.Id;
 import cal.bkup.types.Sha256AndSize;
+import cal.prim.fs.HardLink;
 import cal.prim.fs.SymLink;
 import com.google.common.collect.ImmutableSet;
 
@@ -73,54 +73,30 @@ public class BackupIndex {
       this.type = FileType.SOFT_LINK;
       this.modTime = null;
       this.summary = null;
-      this.linkTarget = link.dst();
+      this.linkTarget = link.getDestination();
     }
 
     public Revision(HardLink link) {
       this.type = FileType.HARD_LINK;
       this.modTime = null;
       this.summary = null;
-      this.linkTarget = link.dst();
+      this.linkTarget = link.getDestination();
     }
-  }
-
-  public static class BackupReportAndKey implements BackupReport {
-
-    final Id idAtTarget;
-    final long sizeAtTarget;
-    final String key;
-
-    public BackupReportAndKey(BackupReport report, String key) {
-      this.idAtTarget = report.idAtTarget();
-      this.sizeAtTarget = report.sizeAtTarget();
-      this.key = key;
-    }
-
-    @Override
-    public Id idAtTarget() {
-      return idAtTarget;
-    }
-
-    @Override
-    public long sizeAtTarget() {
-      return sizeAtTarget;
-    }
-
   }
 
   private final Map<Id, Map<Path, List<Revision>>> files;
-  private final Map<Sha256AndSize, BackupReportAndKey> blobs;
+  private final Map<Sha256AndSize, BackupReport> blobs;
 
   public BackupIndex() {
     this(new HashMap<>(), new HashMap<>());
   }
 
-  private BackupIndex(Map<Id, Map<Path, List<Revision>>> data, Map<Sha256AndSize, BackupReportAndKey> blobs) {
+  private BackupIndex(Map<Id, Map<Path, List<Revision>>> data, Map<Sha256AndSize, BackupReport> blobs) {
     this.files = data;
     this.blobs = blobs;
   }
 
-  public synchronized @Nullable BackupReportAndKey lookupBlob(Sha256AndSize content) {
+  public synchronized @Nullable BackupReport lookupBlob(Sha256AndSize content) {
     return blobs.get(content);
   }
 
@@ -132,8 +108,8 @@ public class BackupIndex {
     return new ArrayList<>(blobs.keySet()).stream();
   }
 
-  public synchronized void addBackedUpBlob(Sha256AndSize content, String key, BackupReport backupReport) {
-    BackupReport previous = blobs.putIfAbsent(content, new BackupReportAndKey(backupReport, key));
+  public synchronized void addBackedUpBlob(Sha256AndSize content, BackupReport backupReport) {
+    BackupReport previous = blobs.putIfAbsent(content, backupReport);
     if (previous != null) {
       throw new IllegalArgumentException("the blob " + content + " is already known");
     }
