@@ -154,6 +154,11 @@ public class Main {
             ? (cli.getOptionValue('P').isEmpty() ? Util.readPassword("New password") : cli.getOptionValue('P'))
             : password;
 
+    if (password == null || newPassword == null) {
+      System.err.println("No password; refusing to proceed");
+      System.exit(1);
+    }
+
     if (!Objects.equals(password, newPassword) && !backup) {
       System.err.println("WARNING: a new password was specified without '-b'; the new password will be ignored.");
     }
