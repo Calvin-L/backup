@@ -1,8 +1,7 @@
 package cal.bkup;
 
-import cal.prim.IOConsumer;
 import cal.bkup.types.Sha256AndSize;
-import cal.prim.Price;
+import cal.prim.IOConsumer;
 import cal.prim.transforms.StatisticsCollectingInputStream;
 
 import java.io.BufferedInputStream;
@@ -123,16 +122,6 @@ public abstract class Util {
     if (l > ONE_MB) return divideAndRoundUp(l, ONE_MB) + " Mb";
     if (l > ONE_KB) return divideAndRoundUp(l, ONE_KB) + " Kb";
     return l + " bytes";
-  }
-
-  public static String formatPrice(Price p) {
-    long pennies = p.valueInCents().longValue();
-    boolean pos = true;
-    if (pennies < 0) {
-      pos = false;
-      pennies = -pennies;
-    }
-    return (pos ? "" : "-") + "$" + (pennies / 100) + '.' + (pennies % 100 / 10) + (pennies % 100 % 10);
   }
 
   public static <T extends Comparable<T>> boolean lt(T x, T y) {

@@ -91,14 +91,13 @@ public class Main {
     @Override
     public Price costToUploadBlob(long numBytes) {
       return numBytes <= AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK ?
-              () -> PENNIES_PER_UPLOAD_REQ :
-              () -> PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(numBytes / AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK).add(BigFraction.TWO));
+              new Price(PENNIES_PER_UPLOAD_REQ) :
+              new Price(PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(numBytes / AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK).add(BigFraction.TWO)));
     }
 
     @Override
     public Price monthlyStorageCostForBlob(long numBytes) {
-      BigFraction value = PENNIES_PER_GB_MONTH.multiply(new BigFraction(numBytes).add(EXTRA_BYTES_PER_ARCHIVE)).divide(ONE_GB);
-      return () -> value;
+      return new Price(PENNIES_PER_GB_MONTH.multiply(new BigFraction(numBytes).add(EXTRA_BYTES_PER_ARCHIVE)).divide(ONE_GB));
     }
   };
 
@@ -228,8 +227,8 @@ public class Main {
       BackerUpper.BackupPlan plan = backupper.planBackup(config.systemName(), password, newPassword, COST_MODEL, files, symlinks, hardlinks);
       System.out.println("Estimated costs:");
       System.out.println("  uploaded bytes:      " + Util.formatSize(plan.estimatedBytesUploaded()));
-      System.out.println("  backup cost now:     " + Util.formatPrice(plan.estimatedExecutionCost()));
-      System.out.println("  monthly maintenance: " + Util.formatPrice(plan.estimatedMonthlyCost()));
+      System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
+      System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
       if (!dryRun && confirm("Proceed?")) {
         plan.execute();
       }
