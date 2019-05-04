@@ -4,6 +4,7 @@
 /.gradle
 *.jar
 *.class
+/lombok.config
 
 # IDEs
 .idea
