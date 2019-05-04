@@ -1,8 +1,6 @@
 package cal.prim.fs;
 
 import cal.prim.IOConsumer;
-import jnr.posix.POSIX;
-import jnr.posix.POSIXFactory;
 
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
@@ -19,9 +17,6 @@ public class PhysicalFilesystem implements Filesystem {
 
   @Override
   public void scan(Path path, Set<PathMatcher> exclusions, IOConsumer<SymLink> onSymlink, IOConsumer<RegularFile> onFile) throws IOException {
-    POSIX posix = POSIXFactory.getPOSIX();
-    assert posix.isNative();
-
     Files.walkFileTree(path, new Visitor(exclusions) {
       @Override
       protected void onFile(Path path, BasicFileAttributes attrs) throws IOException {
