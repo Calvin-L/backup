@@ -2,7 +2,7 @@
 
 all: test
 	gradle installDist
-	rsync -avzc --link-dest=../build/install/bkup build/install/bkup/ dist/
+	rsync -avzc --delete --link-dest=../build/install/bkup build/install/bkup/ dist/
 
 test: update-submodules
 	gradle test
