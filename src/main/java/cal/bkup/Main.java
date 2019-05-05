@@ -238,7 +238,7 @@ public class Main {
       List<RegularFile> files = new ArrayList<>();
       FileTools.forEachFile(config, symlinks::add, hardlinks::add, files::add);
       System.out.println("Planning backup...");
-      BackerUpper.BackupPlan plan = backupper.planBackup(config.systemName(), password, newPassword, COST_MODEL, files, symlinks, hardlinks);
+      BackerUpper.BackupPlan plan = backupper.planBackup(config.getSystemName(), password, newPassword, COST_MODEL, files, symlinks, hardlinks);
       System.out.println("Estimated costs:");
       System.out.println("  uploaded bytes:      " + Util.formatSize(plan.estimatedBytesUploaded()));
       System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
@@ -267,7 +267,7 @@ public class Main {
 
     if (numToCheck > 0) {
       List<Pair<Path, Sha256AndSize>> candidates = backupper.list(newPassword)
-              .filter(item -> item.system().equals(config.systemName()) && item.latestRevision().type == BackupIndex.FileType.REGULAR_FILE)
+              .filter(item -> item.system().equals(config.getSystemName()) && item.latestRevision().type == BackupIndex.FileType.REGULAR_FILE)
               .map(item -> new Pair<>(item.path(), item.latestRevision().summary))
               .collect(Collectors.toList());
       Random random = new Random();
@@ -359,17 +359,7 @@ public class Main {
       }
     }
 
-    return new Config() {
-      @Override
-      public Id systemName() {
-        return systemId;
-      }
-
-      @Override
-      public List<Rule> backupRules() {
-        return rules;
-      }
-    };
+    return new Config(systemId, rules);
   }
 
 }

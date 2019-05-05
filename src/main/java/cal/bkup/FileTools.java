@@ -26,7 +26,7 @@ public class FileTools {
   public static void forEachFile(Config config, IOConsumer<SymLink> symlinkConsumer, IOConsumer<HardLink> hardLinkConsumer, IOConsumer<RegularFile> consumer) throws IOException {
     Filesystem fs = new PhysicalFilesystem();
 
-    List<Rule> rules = config.backupRules();
+    List<Rule> rules = config.getBackupRules();
     Set<PathMatcher> exclusions = new LinkedHashSet<>();
 
     // It is important that this is a sorted set.  This
