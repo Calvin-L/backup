@@ -9,7 +9,9 @@ targetCompatibility = 10
 version = "1.0"
 
 ////////////////////////// Application setup
-mainClassName = "cal.bkup.Main"
+application {
+    mainClassName = "cal.bkup.Main"
+}
 jar {
     manifest {
         attributes "Main-Class": mainClassName,
