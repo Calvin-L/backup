@@ -67,7 +67,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
   }
 
   @Override
-  public PutResult createOrReplace(InputStream data) throws IOException {
+  public PutResult put(InputStream data) throws IOException {
     try {
       byte[] buffer = new byte[AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK];
       int n = Util.readChunk(data, buffer);

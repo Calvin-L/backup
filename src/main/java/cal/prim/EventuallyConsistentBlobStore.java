@@ -38,13 +38,13 @@ public interface EventuallyConsistentBlobStore {
   Stream<String> list() throws IOException;
 
   /**
-   * Create or overwrite an entry.
+   * Create an entry.
    * The new entry might not be immediately visible to {@link #list()} or {@link #open(String)}.
    * @param stream the data to write
    * @return a {@link PutResult} describing the uploaded data
    * @throws IOException if the stream cannot be opened
    */
-  PutResult createOrReplace(InputStream stream) throws IOException;
+  PutResult put(InputStream stream) throws IOException;
 
   /**
    * Open an entry for reading.

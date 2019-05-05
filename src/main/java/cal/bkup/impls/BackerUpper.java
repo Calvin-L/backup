@@ -316,7 +316,7 @@ public class BackerUpper {
       long sizeAtTarget;
       StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(Util.buffered(f.open()), reportProgress);
       try (InputStream transformed = transformer.followedBy(new Encryption(key)).apply(in)) {
-        EventuallyConsistentBlobStore.PutResult result = blobStore.createOrReplace(transformed);
+        EventuallyConsistentBlobStore.PutResult result = blobStore.put(transformed);
         identifier = new Id(result.getIdentifier());
         sizeAtTarget = result.getBytesStored();
       } finally {

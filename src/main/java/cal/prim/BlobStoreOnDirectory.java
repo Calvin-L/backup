@@ -21,7 +21,7 @@ public class BlobStoreOnDirectory implements EventuallyConsistentBlobStore {
   }
 
   @Override
-  public PutResult createOrReplace(InputStream stream) throws IOException {
+  public PutResult put(InputStream stream) throws IOException {
     String id = UUID.randomUUID().toString();
     StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(stream, (x) -> { });
     data.createOrReplace(id, in);
