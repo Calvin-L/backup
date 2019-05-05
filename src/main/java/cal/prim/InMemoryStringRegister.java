@@ -13,7 +13,9 @@ public class InMemoryStringRegister implements StringRegister {
 
   @Override
   public synchronized void write(String expectedValue, String newValue) throws PreconditionFailed {
-    Objects.requireNonNull(newValue);
+    Objects.requireNonNull(expectedValue, "expected value may not be null");
+    Objects.requireNonNull(newValue, "new value may not be null");
+
     if (!value.equals(expectedValue)) {
       throw new PreconditionFailed("expected " + expectedValue + " but got " + newValue);
     }

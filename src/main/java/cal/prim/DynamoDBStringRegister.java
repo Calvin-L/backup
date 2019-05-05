@@ -87,6 +87,7 @@ public class DynamoDBStringRegister implements StringRegister {
 
   @Override
   public void write(String expectedValue, String newValue) throws IOException, PreconditionFailed {
+    Objects.requireNonNull(expectedValue, "expected value may not be null");
     Objects.requireNonNull(newValue, "new value may not be null");
 
     // Dynamo does not allow empty strings, so we model the empty string as a missing record
