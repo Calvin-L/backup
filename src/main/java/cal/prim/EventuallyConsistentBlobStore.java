@@ -13,6 +13,10 @@ import java.util.stream.Stream;
  */
 public interface EventuallyConsistentBlobStore {
 
+  /**
+   * The output of {@link #put(InputStream)}, containing both an {@link #getIdentifier() identifier}
+   * for the uploaded data and a {@link #getBytesStored() byte count} of how many bytes got stored.
+   */
   @Value
   class PutResult {
     /**

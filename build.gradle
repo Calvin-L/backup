@@ -26,6 +26,7 @@ repositories {
 }
 
 dependencies {
+    compile project(":aes-crypt")
     compile project(":crash-safe-io")
     compile "com.amazonaws:aws-java-sdk-glacier:1.11.546"
     compile "com.amazonaws:aws-java-sdk-s3:1.11.546"
