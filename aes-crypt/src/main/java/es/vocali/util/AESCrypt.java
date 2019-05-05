@@ -44,7 +44,19 @@ import java.util.Enumeration;
  * <code>AESCrypt</code> objects can be used as Commands (create, use once and dispose),
  * or reused to perform multiple operations (not concurrently though).
  *
+ * <p>
+ * Calvin Loncaric has made modifications to this file since its original distribution:
+ * <ul>
+ *   <li>Fixed misuse of {@link InputStream#read(byte[])} and
+ *       {@link InputStream#skip(long)}, which may not read or skip exactly the number
+ *       of bytes requested</li>
+ *   <li>Allow encryption and decryption of streams where the total size is not known
+ *       in advance</li>
+ *   <li>Documentation tweaks and fixes</li>
+ * </ul>
+ *
  * @author Vócali Sistemas Inteligentes
+ * @author Calvin Loncaric
  */
 public class AESCrypt {
 	private static final String JCE_EXCEPTION_MESSAGE = "Please make sure "
@@ -354,6 +366,9 @@ public class AESCrypt {
 		}
 	}
 
+	/**
+	 * @author Calvin Loncaric
+	 */
 	private static class BlockWalker {
 		private final PushbackInputStream in;
 		private final int blockLen;
