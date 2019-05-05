@@ -17,7 +17,7 @@ public class InMemoryStringRegister implements StringRegister {
     Objects.requireNonNull(newValue, "new value may not be null");
 
     if (!value.equals(expectedValue)) {
-      throw new PreconditionFailed("expected " + expectedValue + " but got " + newValue);
+      throw new PreconditionFailed("expected " + expectedValue + " but value is currently " + value);
     }
     value = newValue;
   }
