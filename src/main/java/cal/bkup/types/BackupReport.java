@@ -6,7 +6,7 @@ import lombok.Value;
 /**
  * Information about a backed-up file.
  *
- * @see cal.bkup.impls.BackupIndex#addBackedUpBlob(Sha256AndSize, String, BackupReport)
+ * @see cal.bkup.impls.BackupIndex#addBackedUpBlob(Sha256AndSize, BackupReport)
  * @see cal.bkup.impls.BackupIndex#lookupBlob(Sha256AndSize)
  */
 @Value

@@ -308,7 +308,7 @@ public abstract class Util {
    * <p>Sample usage for this method:
    *
    * <pre>
-   *   Runnable onShutdown = () -> { System.err.println("Ignoring shutdown..."); };
+   *   Runnable onShutdown = () -&gt; { System.err.println("Ignoring shutdown..."); };
    *   try (Util.catchShutdown(onShutdown)) {
    *     // work uninterrupted
    *   }

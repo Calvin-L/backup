@@ -41,7 +41,7 @@ import java.util.Enumeration;
  * Cryptography Extension (JCE) Unlimited Strength Jurisdiction Policy Files</a>.
  * <p>
  * Thread-safety and sharing: this class is not thread-safe.<br>
- * <tt>AESCrypt</tt> objects can be used as Commands (create, use once and dispose),
+ * <code>AESCrypt</code> objects can be used as Commands (create, use once and dispose),
  * or reused to perform multiple operations (not concurrently though).
  *
  * @author Vócali Sistemas Inteligentes
@@ -107,7 +107,7 @@ public class AESCrypt {
 
 	/**
 	 * Generates a pseudo-random byte array.
-	 * @return pseudo-random byte array of <tt>len</tt> bytes.
+	 * @return pseudo-random byte array of <code>len</code> bytes.
 	 */
 	protected byte[] generateRandomBytes(int len) {
 		byte[] bytes = new byte[len];
@@ -118,7 +118,7 @@ public class AESCrypt {
 
 	/**
 	 * SHA256 digest over given byte array and random bytes.<br>
-	 * <tt>bytes.length</tt> * <tt>num</tt> random bytes are added to the digest.
+	 * <code>bytes.length * num</code> random bytes are added to the digest.
 	 * <p>
 	 * The generated hash is saved back to the original byte array.<br>
 	 * Maximum array size is {@link #SHA_SIZE} bytes.
@@ -292,7 +292,7 @@ public class AESCrypt {
 	/**
 	 * The input stream is encrypted and saved to the output stream.
 	 * <p>
-	 * <tt>version</tt> can be either 1 or 2.<br>
+	 * <code>version</code> can be either 1 or 2.<br>
 	 * None of the streams are closed.
 	 * @throws IOException when there are I/O errors.
 	 * @throws GeneralSecurityException if the platform does not support the required cryptographic methods.
