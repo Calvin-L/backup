@@ -73,11 +73,6 @@ public class DynamoDBStringRegister implements StringRegister {
     this.registerName = registerName;
   }
 
-  // Dynamo does not accept null or empty values for strings.
-  private boolean isNull(String s) {
-    return s == null || s.length() == 0;
-  }
-
   @Override
   public String read() throws IOException {
     Item item = table.getItem(new GetItemSpec()
@@ -93,11 +88,14 @@ public class DynamoDBStringRegister implements StringRegister {
   @Override
   public void write(String expectedValue, String newValue) throws IOException, PreconditionFailed {
     Objects.requireNonNull(newValue, "new value may not be null");
-    Expected precondition = isNull(expectedValue) ?
+
+    // Dynamo does not allow empty strings, so we model the empty string as a missing record
+    Expected precondition = expectedValue.isEmpty() ?
             new Expected(VALUE_FIELD).notExist() :
             new Expected(VALUE_FIELD).eq(expectedValue);
+
     try {
-      if (newValue.length() == 0) {
+      if (newValue.isEmpty()) {
         table.deleteItem(new PrimaryKey(PRIMARY_KEY_FIELD, registerName), precondition);
       } else {
         Item item = new Item()
