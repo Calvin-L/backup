@@ -317,8 +317,8 @@ public class BackerUpper {
       StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(Util.buffered(f.open()), reportProgress);
       try (InputStream transformed = transformer.followedBy(new Encryption(key)).apply(in)) {
         EventuallyConsistentBlobStore.PutResult result = blobStore.createOrReplace(transformed);
-        identifier = new Id(result.identifier());
-        sizeAtTarget = result.bytesStored();
+        identifier = new Id(result.getIdentifier());
+        sizeAtTarget = result.getBytesStored();
       } finally {
         display.finishTask(task); // TODO: print identifier and byte count?
       }

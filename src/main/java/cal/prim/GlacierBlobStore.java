@@ -126,17 +126,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
     CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
     String resultId = compResult.getArchiveId();
     final long grandTotal = total;
-    return new PutResult() {
-      @Override
-      public String identifier() {
-        return resultId;
-      }
-
-      @Override
-      public long bytesStored() {
-        return grandTotal;
-      }
-    };
+    return new PutResult(resultId, grandTotal);
   }
 
   private PutResult uploadBytes(byte[] bytes, int n) {
@@ -148,17 +138,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
             .withBody(new ByteArrayInputStream(bytes, 0, n));
     UploadArchiveResult res = client.uploadArchive(req);
     String id = res.getArchiveId();
-    return new PutResult() {
-      @Override
-      public String identifier() {
-        return id;
-      }
-
-      @Override
-      public long bytesStored() {
-        return n;
-      }
-    };
+    return new PutResult(id, n);
   }
 
   private static final Path listLoc = Paths.get("/tmp/glacier-inventory");

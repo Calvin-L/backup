@@ -25,17 +25,7 @@ public class BlobStoreOnDirectory implements EventuallyConsistentBlobStore {
     String id = UUID.randomUUID().toString();
     StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(stream, (x) -> { });
     data.createOrReplace(id, in);
-    return new PutResult() {
-      @Override
-      public String identifier() {
-        return id;
-      }
-
-      @Override
-      public long bytesStored() {
-        return in.getBytesRead();
-      }
-    };
+    return new PutResult(id, in.getBytesRead());
   }
 
   @Override

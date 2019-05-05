@@ -1,5 +1,7 @@
 package cal.prim;
 
+import lombok.Value;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.stream.Stream;
@@ -11,20 +13,21 @@ import java.util.stream.Stream;
  */
 public interface EventuallyConsistentBlobStore {
 
-  interface PutResult {
+  @Value
+  class PutResult {
     /**
-     * @return the identifier to retrieve the uploaded object
+     * The identifier to retrieve the uploaded object.
      */
-    String identifier();
+    String identifier;
 
     /**
-     * @return the number of bytes stored in the blob store.
-     *         If you know the size of the data you sent, this
-     *         number can be used as a "poor person's checksum" to
-     *         verify that all of the data arrived.  If you do not,
-     *         this number tells you the answer.
+     * The number of bytes stored in the blob store.
+     * If you know the size of the data you sent, this
+     * number can be used as a "poor person's checksum" to
+     * verify that all of the data arrived.  If you do not,
+     * this number tells you the answer.
      */
-    long bytesStored();
+    long bytesStored;
   }
 
   /**
