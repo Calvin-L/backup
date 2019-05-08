@@ -35,6 +35,10 @@ import java.util.stream.Stream;
  * that uses a <code>BackupIndex</code> must ensure that the index's view of the world is
  * honest: if the index reports that a file is backed up to a permanent location, then it
  * really has been.
+ *
+ * <p>Instances of this class are completely thread-safe.  All modification methods are
+ * atomic.  All query methods return immutable copies of their results, so their
+ * answers will not be affected by the actions of other threads in the future.
  */
 public class BackupIndex {
 
