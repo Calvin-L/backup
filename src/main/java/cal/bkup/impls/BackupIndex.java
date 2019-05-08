@@ -10,6 +10,7 @@ import com.google.common.collect.ImmutableSet;
 import javax.annotation.Nullable;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -53,6 +54,9 @@ public class BackupIndex {
     public final FileType type;
 
     // type is REGULAR_FILE
+    /**
+     * The file's modification time, truncated to millisecond precision.
+     */
     public final Instant modTime;
     public final Sha256AndSize summary;
 
@@ -150,10 +154,21 @@ public class BackupIndex {
             .computeIfAbsent(path, p -> new ArrayList<>());
   }
 
+  /**
+   * Add a regular-file type revision for a path.
+   *
+   * <p>NOTE: <code>modTime</code> will be truncated to millisecond precision.
+   *
+   * @param system the system that the file is on
+   * @param path the path to the file
+   * @param modTime the file's modification time
+   * @param contentSummary a summary of the file's contents on disk
+   */
   public synchronized void appendRevision(Id system, Path path, Instant modTime, Sha256AndSize contentSummary) {
     if (lookupBlob(contentSummary) == null) {
       throw new IllegalArgumentException("Refusing to add backed up file that references nonexistent blob " + contentSummary);
     }
+    modTime = modTime.truncatedTo(ChronoUnit.MILLIS);
     findOrAddRevisionList(system, path).add(new Revision(modTime, contentSummary));
   }
 

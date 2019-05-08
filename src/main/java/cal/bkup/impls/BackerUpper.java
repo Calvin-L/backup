@@ -26,6 +26,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -97,8 +98,9 @@ public class BackerUpper {
       inThisBackup.add(f.getPath());
       BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.getPath());
       Instant lastModTime = (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE) ? latest.modTime : null;
-      if (!Objects.equals(lastModTime, f.getModTime())) {
-        System.out.println(" --> " + f.getPath() + " [" + lastModTime + " --> " + f.getModTime() + ']');
+      Instant localModTime = f.getModTime().truncatedTo(ChronoUnit.MILLIS);
+      if (!Objects.equals(lastModTime, localModTime)) {
+        System.out.println(" --> " + f.getPath() + " [" + lastModTime + " --> " + localModTime + ']');
         long size = f.getSizeInBytes();
         bytesUploaded += size;
         totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
