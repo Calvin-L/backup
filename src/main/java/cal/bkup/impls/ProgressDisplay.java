@@ -1,12 +1,13 @@
 package cal.bkup.impls;
 
+import cal.prim.QuietAutoCloseable;
 import cal.prim.RateLimitedRunnable;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ProgressDisplay implements AutoCloseable {
+public class ProgressDisplay implements QuietAutoCloseable {
 
   public static class Task {
     private String description;
