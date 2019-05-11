@@ -44,9 +44,14 @@ public interface EventuallyConsistentBlobStore {
   /**
    * Create an entry.
    * The new entry might not be immediately visible to {@link #list()} or {@link #open(String)}.
+   * This method never overwrites an existing entry.
+   *
    * @param stream the data to write
    * @return a {@link PutResult} describing the uploaded data
-   * @throws IOException if the stream cannot be opened
+   * @throws IOException if an I/O error occurs while reading the stream or writing the new entry.
+   *   This exception should be treated as an <em>ambiguous</em> outcome: the entry might have been
+   *   created or it might not.  Even if it was created, it might not be immediately visible to
+   *   {@link #list()} or {@link #open(String)}.
    */
   PutResult put(InputStream stream) throws IOException;
 
