@@ -1,11 +1,13 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.BackupReport;
-import cal.bkup.types.SystemId;
 import cal.bkup.types.Sha256AndSize;
+import cal.bkup.types.SystemId;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.SymLink;
 import com.google.common.collect.ImmutableSet;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -50,6 +52,8 @@ public class BackupIndex {
     TOMBSTONE
   }
 
+  @ToString
+  @EqualsAndHashCode
   public static class Revision {
     public final FileType type;
 
