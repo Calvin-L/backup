@@ -4,7 +4,7 @@ import java.io.IOException;
 
 /**
  * A mutable String value.  The value is initially empty and is never null.  All implementations
- * of this class are thread-safe.
+ * of this interface are thread-safe.
  */
 public interface StringRegister {
 
