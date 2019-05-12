@@ -53,10 +53,16 @@ public class SQLiteStringRegister implements StringRegister {
     try (PreparedStatement stmt = conn.prepareStatement("UPDATE tbl SET value=? WHERE value=?")) {
       stmt.setString(1, newValue);
       stmt.setString(2, expectedValue);
-      if (stmt.executeUpdate() != 1) {
-        throw new PreconditionFailed();
+      int rowsChanged = stmt.executeUpdate();
+      switch (rowsChanged) {
+        case 1:
+          conn.commit();
+          return;
+        case 0:
+          throw new PreconditionFailed();
+        default:
+          throw new IllegalStateException("updated " + rowsChanged + " rows; should have been 0 or 1!");
       }
-      conn.commit();
     } catch (SQLException e) {
       throw new IOException(e);
     }
