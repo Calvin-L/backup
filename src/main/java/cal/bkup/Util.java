@@ -19,7 +19,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
-import java.util.NoSuchElementException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -32,8 +31,21 @@ public abstract class Util {
   public static final long ONE_GB = ONE_MB * 1024;
   public static final long ONE_TB = ONE_GB * 1024;
 
+  /**
+   * The suggested size of in-memory byte buffers for I/O.
+   * The value is 8192, which is currently the size used by {@link BufferedInputStream}
+   * on desktop JVMs.
+   *
+   * <p>Performance note: there is a large benefit to having every layer of a software
+   * system use the same buffer size.  If data from one stream using one buffer size is
+   * piped to a consumer reading with a different buffer size, the mismatch can cause
+   * an unexpected performance hit.
+   */
   public static final int SUGGESTED_BUFFER_SIZE = 8192;
 
+  /**
+   * A thread-local byte array of {@link #SUGGESTED_BUFFER_SIZE} bytes.
+   */
   private static final ThreadLocal<byte[]> MEM_BUFFER = ThreadLocal.withInitial(() -> new byte[SUGGESTED_BUFFER_SIZE]);
 
   public static long copyStream(InputStream in, OutputStream out) throws IOException {
@@ -59,17 +71,6 @@ public abstract class Util {
     return md;
   }
 
-  public static long copyStreamAndCaptureSize(InputStream in, OutputStream out) throws IOException {
-    byte[] buf = MEM_BUFFER.get();
-    long count = 0;
-    int n;
-    while ((n = in.read(buf)) >= 0) {
-      out.write(buf, 0, n);
-      count += n;
-    }
-    return count;
-  }
-
   public static Sha256AndSize summarize(InputStream in, Consumer<StatisticsCollectingInputStream> progressCallback) throws IOException {
     StatisticsCollectingInputStream s = new StatisticsCollectingInputStream(in, progressCallback);
     drain(s);
@@ -85,16 +86,6 @@ public abstract class Util {
       copyStream(in, out);
       return out.toByteArray();
     }
-  }
-
-  public static void ensure(boolean b) {
-    if (!b) {
-      throw new RuntimeException("condition failure");
-    }
-  }
-
-  public static <R> R fail() {
-    throw new RuntimeException("failure");
   }
 
   public static String readPassword(String prompt) {
@@ -256,30 +247,6 @@ public abstract class Util {
       count += n;
     }
     return count;
-  }
-
-  public static long maximum(long[] array) throws NoSuchElementException {
-    if (array.length == 0) {
-      throw new NoSuchElementException();
-    }
-    long result = array[0];
-    for (int i = 1; i < array.length; ++i) {
-      result = Math.max(result, array[i]);
-    }
-    return result;
-  }
-
-  public static void run(String... args) throws IOException {
-    Process p = new ProcessBuilder(args)
-            .inheritIO()
-            .start();
-    while (true) {
-      try {
-        p.waitFor();
-        break;
-      } catch (InterruptedException ignored) {
-      }
-    }
   }
 
   public static int readChunk(InputStream in, byte[] chunk) throws IOException {
