@@ -6,6 +6,7 @@ import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.types.Config;
 import cal.bkup.types.SystemId;
+import cal.prim.NoValue;
 import cal.prim.fs.HardLink;
 import cal.bkup.types.IndexFormat;
 import cal.prim.fs.RegularFile;
@@ -43,6 +44,7 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.math3.fraction.BigFraction;
 
+import java.io.BufferedInputStream;
 import java.io.Console;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -121,6 +123,7 @@ public class Main {
     options.addOption("l", "list", false, "Show inventory of current backup");
     options.addOption("c", "spot-check", true, "Spot-check N backed-up files");
     options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
+    options.addOption(Option.builder().longOpt("dump-index").desc("Dump the raw index (for debugging or recovery)").build());
 
     CommandLine cli;
     try {
@@ -141,10 +144,11 @@ public class Main {
     final boolean list = cli.hasOption('l');
     final boolean gc = cli.hasOption("gc");
     final boolean backup = cli.hasOption("backup");
+    final boolean dumpIndex = cli.hasOption("dump-index");
     final boolean local = cli.hasOption("local");
     final int numToCheck = cli.hasOption('c') ? Integer.parseInt(cli.getOptionValue('c')) : 0;
 
-    if (!backup && !list && numToCheck == 0 && !gc) {
+    if (!backup && !list && numToCheck == 0 && !gc && !dumpIndex) {
       System.err.println("No action specified. Did you mean to pass '-b'?");
       return;
     }
@@ -263,6 +267,14 @@ public class Main {
 
     if (gc) {
       backupper.cleanup();
+    }
+
+    if (dumpIndex) {
+      try (InputStream in = new BufferedInputStream(backupper.readRawIndex(newPassword))) {
+        Util.copyStream(in, System.out);
+      } catch (NoValue noValue) {
+        System.out.println("No backups have ever been made; there is no index.");
+      }
     }
 
     if (numToCheck > 0) {

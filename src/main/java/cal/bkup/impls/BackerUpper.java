@@ -363,6 +363,10 @@ public class BackerUpper {
     }
   }
 
+  public InputStream readRawIndex(String password) throws IOException, NoValue {
+    return transformer.followedBy(new Encryption(password)).unApply(indexStore.read(indexStore.head()));
+  }
+
   /**
    * Commit the contents of {@link #index} to {@link #indexStore}.
    * If another process has modified the index stored in {@link #indexStore},
