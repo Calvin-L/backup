@@ -1,6 +1,7 @@
 package cal.prim;
 
 import cal.bkup.Util;
+import lombok.NonNull;
 import lombok.Value;
 
 import java.io.ByteArrayInputStream;
@@ -37,7 +38,7 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
 
   @Value
   private static class MyTag implements Tag {
-    String id;
+    @NonNull String id;
   }
 
   private MyTag upcast(Tag tag) {
