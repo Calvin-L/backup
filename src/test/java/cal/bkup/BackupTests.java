@@ -3,7 +3,7 @@ package cal.bkup;
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormat;
-import cal.bkup.types.Id;
+import cal.bkup.types.SystemId;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
 import cal.prim.BlobStoreOnDirectory;
@@ -51,7 +51,7 @@ public class BackupTests {
   @Test
   public void test() throws IOException, NoValue, BackupIndex.MergeConflict {
 
-    final Id system = new Id("foobar");
+    final SystemId system = new SystemId("foobar");
     final String password = "fizzbuzz";
 
     final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), new InMemoryDir());
@@ -151,7 +151,7 @@ public class BackupTests {
   @Test
   public void testMove() throws IOException, BackupIndex.MergeConflict {
 
-    final Id system = new Id("foobar");
+    final SystemId system = new SystemId("foobar");
     final String password = "fizzbuzz";
 
     final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), new InMemoryDir());
@@ -255,8 +255,8 @@ public class BackupTests {
   @Test(enabled = false)
   public void testConcurrentBackup() throws IOException, InterruptedException, BackupIndex.MergeConflict {
 
-    final Id systemA = new Id("foobar");
-    final Id systemB = new Id("barfoo");
+    final SystemId systemA = new SystemId("foobar");
+    final SystemId systemB = new SystemId("barfoo");
     final String password = "fizzbuzz";
 
     final StringRegister register = new InMemoryStringRegister();

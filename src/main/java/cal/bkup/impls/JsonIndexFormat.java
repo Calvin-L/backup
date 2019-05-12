@@ -2,8 +2,8 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
+import cal.bkup.types.SystemId;
 import cal.prim.fs.HardLink;
-import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.fs.SymLink;
@@ -54,10 +54,10 @@ public class JsonIndexFormat implements IndexFormat {
     for (JsonBlob blob : f.blobs) {
       index.addBackedUpBlob(
               new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size),
-              new BackupReport(new Id(blob.backupId), blob.backupSize, blob.key));
+              new BackupReport(blob.backupId, blob.backupSize, blob.key));
     }
     for (Map.Entry<String, Map<String, List<Revision>>> entry : f.files.entrySet()) {
-      Id system = new Id(entry.getKey());
+      SystemId system = new SystemId(entry.getKey());
       for (Map.Entry<String, List<Revision>> entry2 : entry.getValue().entrySet()) {
         Path path = Paths.get(entry2.getKey());
         for (Revision rev : entry2.getValue()) {
@@ -89,7 +89,7 @@ public class JsonIndexFormat implements IndexFormat {
       blob.key = report.getKey();
       blob.sha256 = Util.sha256toString(b.getSha256());
       blob.size = b.getSize();
-      blob.backupId = report.getIdAtTarget().toString();
+      blob.backupId = report.getIdAtTarget();
       blob.backupSize = report.getSizeAtTarget();
       result.blobs.add(blob);
     });

@@ -2,7 +2,7 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
-import cal.bkup.types.Id;
+import cal.bkup.types.SystemId;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
@@ -77,7 +77,7 @@ public class BackerUpper {
   }
 
   public BackupPlan planBackup(
-          Id whatSystemIsThis,
+          SystemId whatSystemIsThis,
           String passwordForIndex,
           String newPasswordForIndex,
           StorageCostModel blobStorageCosts,
@@ -151,7 +151,7 @@ public class BackerUpper {
 
   }
 
-  public void backup(Id whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
+  public void backup(SystemId whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
 
     List<String> warnings = new ArrayList<>();
     final AtomicBoolean keepRunning = new AtomicBoolean(true);
@@ -225,17 +225,17 @@ public class BackerUpper {
   }
 
   public static class BackedUpThing {
-    private final Id system;
+    private final SystemId system;
     private final Path path;
     private final BackupIndex.Revision latestRevision;
 
-    public BackedUpThing(Id system, Path path, BackupIndex.Revision latestRevision) {
+    public BackedUpThing(SystemId system, Path path, BackupIndex.Revision latestRevision) {
       this.system = system;
       this.path = path;
       this.latestRevision = latestRevision;
     }
 
-    public Id system() {
+    public SystemId system() {
       return system;
     }
 
@@ -262,7 +262,7 @@ public class BackerUpper {
     if (report == null) {
       throw new NoSuchElementException();
     }
-    return transformer.followedBy(new Encryption(report.getKey())).unApply(blobStore.open(report.getIdAtTarget().toString()));
+    return transformer.followedBy(new Encryption(report.getKey())).unApply(blobStore.open(report.getIdAtTarget()));
   }
 
   public void cleanup() throws IOException {
@@ -284,7 +284,7 @@ public class BackerUpper {
    * @throws NoSuchFileException if another process deletes the file before or during upload
    * @throws IOException
    */
-  private void uploadAndAddToIndex(BackupIndex index, Id systemId, RegularFile f, ProgressDisplay display) throws IOException {
+  private void uploadAndAddToIndex(BackupIndex index, SystemId systemId, RegularFile f, ProgressDisplay display) throws IOException {
     // (1) Get the modification time.
     // This has to happen before computing the checksum.  Otherwise,
     // we might miss a new revision of the file on a future backup.
@@ -314,12 +314,12 @@ public class BackerUpper {
       Consumer<StatisticsCollectingInputStream> reportProgress = s -> {
         display.reportProgress(task, s.getBytesRead(), f.getSizeInBytes());
       };
-      Id identifier;
+      String identifier;
       long sizeAtTarget;
       StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(Util.buffered(f.open()), reportProgress);
       try (InputStream transformed = transformer.followedBy(new Encryption(key)).apply(in)) {
         EventuallyConsistentBlobStore.PutResult result = blobStore.put(transformed);
-        identifier = new Id(result.getIdentifier());
+        identifier = result.getIdentifier();
         sizeAtTarget = result.getBytesStored();
       } finally {
         display.finishTask(task); // TODO: print identifier and byte count?

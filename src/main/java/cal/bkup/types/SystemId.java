@@ -2,8 +2,11 @@ package cal.bkup.types;
 
 import lombok.Value;
 
+/**
+ * A unique identifier for a system.  A system is a computer with a filesystem.
+ */
 @Value
-public class Id {
+public class SystemId {
   String value;
 
   @Override

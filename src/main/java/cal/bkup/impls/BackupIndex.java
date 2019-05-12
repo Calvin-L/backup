@@ -1,7 +1,7 @@
 package cal.bkup.impls;
 
 import cal.bkup.types.BackupReport;
-import cal.bkup.types.Id;
+import cal.bkup.types.SystemId;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.SymLink;
@@ -92,14 +92,14 @@ public class BackupIndex {
     }
   }
 
-  private final Map<Id, Map<Path, List<Revision>>> files;
+  private final Map<SystemId, Map<Path, List<Revision>>> files;
   private final Map<Sha256AndSize, BackupReport> blobs;
 
   public BackupIndex() {
     this(new HashMap<>(), new HashMap<>());
   }
 
-  private BackupIndex(Map<Id, Map<Path, List<Revision>>> data, Map<Sha256AndSize, BackupReport> blobs) {
+  private BackupIndex(Map<SystemId, Map<Path, List<Revision>>> data, Map<Sha256AndSize, BackupReport> blobs) {
     this.files = data;
     this.blobs = blobs;
   }
@@ -123,16 +123,16 @@ public class BackupIndex {
     }
   }
 
-  public synchronized Set<Id> knownSystems() {
+  public synchronized Set<SystemId> knownSystems() {
     return ImmutableSet.copyOf(files.keySet());
   }
 
-  public synchronized Set<Path> knownPaths(Id system) {
+  public synchronized Set<Path> knownPaths(SystemId system) {
     Map<Path, List<Revision>> info = files.get(system);
     return info != null ? ImmutableSet.copyOf(info.keySet()) : Collections.emptySet();
   }
 
-  public synchronized List<Revision> getInfo(Id system, Path path) {
+  public synchronized List<Revision> getInfo(SystemId system, Path path) {
     Map<Path, List<Revision>> info = files.get(system);
     if (info == null) {
       return Collections.emptyList();
@@ -141,7 +141,7 @@ public class BackupIndex {
     return revisions != null ? new ArrayList<>(revisions) : Collections.emptyList();
   }
 
-  public synchronized @Nullable Revision mostRecentRevision(Id system, Path path) {
+  public synchronized @Nullable Revision mostRecentRevision(SystemId system, Path path) {
     List<Revision> revisions = getInfo(system, path);
     if (revisions.isEmpty()) {
       return null;
@@ -149,7 +149,7 @@ public class BackupIndex {
     return revisions.get(revisions.size() - 1);
   }
 
-  private List<Revision> findOrAddRevisionList(Id system, Path path) {
+  private List<Revision> findOrAddRevisionList(SystemId system, Path path) {
     return files.computeIfAbsent(system, s -> new HashMap<>())
             .computeIfAbsent(path, p -> new ArrayList<>());
   }
@@ -164,7 +164,7 @@ public class BackupIndex {
    * @param modTime the file's modification time
    * @param contentSummary a summary of the file's contents on disk
    */
-  public synchronized void appendRevision(Id system, Path path, Instant modTime, Sha256AndSize contentSummary) {
+  public synchronized void appendRevision(SystemId system, Path path, Instant modTime, Sha256AndSize contentSummary) {
     if (lookupBlob(contentSummary) == null) {
       throw new IllegalArgumentException("Refusing to add backed up file that references nonexistent blob " + contentSummary);
     }
@@ -172,15 +172,15 @@ public class BackupIndex {
     findOrAddRevisionList(system, path).add(new Revision(modTime, contentSummary));
   }
 
-  public synchronized void appendRevision(Id system, Path path, HardLink link) {
+  public synchronized void appendRevision(SystemId system, Path path, HardLink link) {
     findOrAddRevisionList(system, path).add(new Revision(link));
   }
 
-  public synchronized void appendRevision(Id system, Path path, SymLink link) {
+  public synchronized void appendRevision(SystemId system, Path path, SymLink link) {
     findOrAddRevisionList(system, path).add(new Revision(link));
   }
 
-  public synchronized void appendTombstone(Id system, Path path) {
+  public synchronized void appendTombstone(SystemId system, Path path) {
     findOrAddRevisionList(system, path).add(new Revision());
   }
 

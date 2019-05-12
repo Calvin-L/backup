@@ -6,6 +6,6 @@ import java.util.List;
 
 @Value
 public class Config {
-  Id systemName;
+  SystemId systemName;
   List<Rule> backupRules;
 }

@@ -14,7 +14,7 @@ public class BackupReport {
   /**
    * The identifier for the file contents in the target store.
    */
-  @NonNull Id idAtTarget;
+  @NonNull String idAtTarget;
 
   /**
    * The number of bytes stored by the backup target to contain the data.

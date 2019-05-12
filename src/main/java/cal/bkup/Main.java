@@ -5,8 +5,8 @@ import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.types.Config;
+import cal.bkup.types.SystemId;
 import cal.prim.fs.HardLink;
-import cal.bkup.types.Id;
 import cal.bkup.types.IndexFormat;
 import cal.prim.fs.RegularFile;
 import cal.bkup.types.Rule;
@@ -332,7 +332,7 @@ public class Main {
       r = mapper.readValue(in, RawConfig.class);
     }
 
-    Id systemId = new Id(r.system);
+    SystemId systemId = new SystemId(r.system);
     Pattern p = Pattern.compile("^(.) (.*)$");
     List<Rule> rules = new ArrayList<>();
     for (String rule : r.rules) {
