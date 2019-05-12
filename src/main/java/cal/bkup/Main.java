@@ -200,11 +200,13 @@ public class Main {
               indexStore, indexFormat,
               blobStore, transform);
     } else {
+      var credentials = AWSTools.credentialsProvider();
+
       StringRegister register = new DynamoDBStringRegister(
               new DynamoDB(AmazonDynamoDBClientBuilder
                       .standard()
                       .withRegion(AWS_REGION)
-                      .withCredentials(AWSTools.credentialsProvider())
+                      .withCredentials(credentials)
                       .build()),
               DYNAMO_TABLE,
               DYNAMO_REGISTER);
@@ -212,7 +214,7 @@ public class Main {
       EventuallyConsistentDirectory dir = new S3Directory(
               AmazonS3ClientBuilder
                       .standard()
-                      .withCredentials(AWSTools.credentialsProvider())
+                      .withCredentials(credentials)
                       .withRegion(AWS_REGION)
                       .build(),
               S3_BUCKET);
@@ -222,7 +224,7 @@ public class Main {
       EventuallyConsistentBlobStore blobStore = new GlacierBlobStore(
               AmazonGlacierClientBuilder
                       .standard()
-                      .withCredentials(AWSTools.credentialsProvider())
+                      .withCredentials(credentials)
                       .withRegion(AWS_REGION)
                       .build(),
               GLACIER_VAULT_NAME);
