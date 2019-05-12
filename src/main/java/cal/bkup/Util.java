@@ -309,7 +309,7 @@ public abstract class Util {
    *
    * <pre>
    *   Runnable onShutdown = () -&gt; { System.err.println("Ignoring shutdown..."); };
-   *   try (Util.catchShutdown(onShutdown)) {
+   *   try (QuietAutoCloseable ignored = Util.catchShutdown(onShutdown)) {
    *     // work uninterrupted
    *   }
    *   // normal shutdowns are possible again out here
