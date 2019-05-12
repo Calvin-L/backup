@@ -23,9 +23,9 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
 
   public ConsistentBlobOnEventuallyConsistentDirectory(StringRegister clock, EventuallyConsistentDirectory directory) throws IOException {
     if (clock.read().equals("")) {
+      String name = freshName(0);
+      directory.createOrReplace(name, new ByteArrayInputStream(new byte[0]));
       try {
-        String name = freshName(0);
-        directory.createOrReplace(name, new ByteArrayInputStream(new byte[0]));
         clock.write("", name);
       } catch (PreconditionFailed e) {
         throw new ConcurrentModificationException(e);
