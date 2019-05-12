@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.ConcurrentModificationException;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -114,22 +115,37 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
   }
 
   @Override
-  public void cleanup() throws IOException {
+  public void cleanup(boolean forReal) throws IOException {
     String currentHead = head().id;
     final long cutoff = associatedClockValue(currentHead);
 
     // Find all the entries.
     Collection<String> toDelete = directory.list().collect(Collectors.toCollection(ArrayList::new));
-    toDelete.removeIf(name ->
-            // Do not delete those whose clock values are > cutoff.
-            associatedClockValue(name) > cutoff ||
-            // Do not delete the current head.
-            name.equals(currentHead));
 
-    // Do the deletion for those that remain.
     for (String name : toDelete) {
-      System.out.println("Deleting old blob " + name);
-      directory.delete(name);
+      final long clockValue;
+      try {
+        clockValue = associatedClockValue(name);
+      } catch (IllegalArgumentException e) {
+        System.err.println("WARNING: keeping object with malformed name " + name);
+        continue;
+      }
+
+      // Notes:
+      //  - The current head can NOT be deleted.
+      //  - An object with a clock value < cutoff might have been a previous head, and can be
+      //    deleted.
+      //  - An object with a clock value = cutoff is either the current head or a write that
+      //    produced (or will produce) a PreconditionFailed.  In the latter case, it can be
+      //    deleted.
+      //  - An object with a clock value > cutoff is a write that MAY succeed in the future, and
+      //    can NOT be deleted.
+      if (clockValue <= cutoff && !Objects.equals(name, currentHead)) {
+        System.out.println("Deleting old blob " + name);
+        if (forReal) {
+          directory.delete(name);
+        }
+      }
     }
 
   }

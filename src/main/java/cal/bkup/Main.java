@@ -268,7 +268,7 @@ public class Main {
     }
 
     if (gc) {
-      backupper.cleanup();
+      backupper.cleanup(!dryRun, Duration.ofDays(60));
     }
 
     if (dumpIndex) {

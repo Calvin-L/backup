@@ -47,10 +47,12 @@ public interface ConsistentBlob {
   Tag write(Tag expected, InputStream data) throws IOException, PreconditionFailed;
 
   /**
-   * Delete stale data.
-   * Some implementations require this to be called periodically to clean up old data.
+   * Delete stale data.  Some implementations require this to be called periodically to clean up old data.
+   * This method is always safe to call.  It can always be retried if it fails.
+   *
+   * @param forReal true to actually clean up, or false for a "dry run" that only prints what would be done
    * @throws IOException if something goes wrong
    */
-  default void cleanup() throws IOException { }
+  default void cleanup(boolean forReal) throws IOException { }
 
 }

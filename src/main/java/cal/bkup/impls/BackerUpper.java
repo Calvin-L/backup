@@ -265,8 +265,20 @@ public class BackerUpper {
     return transformer.followedBy(new Encryption(report.getKey())).unApply(blobStore.open(report.getIdAtTarget()));
   }
 
-  public void cleanup() throws IOException {
-    indexStore.cleanup();
+  /**
+   * Clean up old state.  This method calls <code>{@link ConsistentBlob#cleanup(boolean) cleanup}(forReal)</code>
+   * on the index store.  It also deletes snapshots of backed-up files that are older than the given
+   * <code>retentionTime</code>.
+   *
+   * @param forReal true to actually clean up, or false for a "dry run" that only prints what would be done
+   * @param retentionTime how far back to keep snapshots of files
+   * @throws IOException if an error occurs during cleanup.  This is an "ambiguous" outcome: the cleanup might
+   *   only partially happen.  Some of the cleanup that was incomplete might happen in the future.  This
+   *   exception can be thrown even if <code>forReal == false</code>, indicating that something went wrong
+   *   while determining what can be cleaned up.
+   */
+  public void cleanup(boolean forReal, Duration retentionTime) throws IOException {
+    indexStore.cleanup(forReal);
     // TODO: prune old data from BackupIndex
     // TODO: when can we delete things in the blob store?
     throw new UnsupportedOperationException();
