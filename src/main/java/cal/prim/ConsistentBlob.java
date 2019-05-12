@@ -28,7 +28,7 @@ public interface ConsistentBlob {
    * before this function can read it.  In that case the caller should retry by calling
    * {@link #head()} again.
    * @param entry a tag
-   * @return a stream to read the entry
+   * @return an unbuffered stream to read the entry
    * @throws IOException if something goes wrong
    * @throws NoValue if no value has ever been written
    */

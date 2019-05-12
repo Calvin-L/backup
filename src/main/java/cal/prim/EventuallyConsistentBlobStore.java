@@ -58,7 +58,7 @@ public interface EventuallyConsistentBlobStore {
   /**
    * Open an entry for reading.
    * @param name the entry to read
-   * @return a stream to read from
+   * @return an unbuffered stream to read from
    * @throws IOException if the stream cannot be opened
    * @throws java.nio.file.NoSuchFileException if the entry does not exist
    */
