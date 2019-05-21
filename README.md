@@ -12,17 +12,29 @@ Project goals:
  - detection of moved files
  - deduplication
 
-## Quickstart
+## "Quick" Start
 
-Configure:
+You'll need Make, Gradle, and a Java JDK version 10 or higher.
+
+Make sure you have a `~/.aws/credentials` file with your AWS credentials:
+
+    [default]
+    aws_access_key_id=ACCESS_KEY
+    aws_secret_access_key=SECRET_KEY
+
+Configure what files will be backed up:
 
     cp example-config.json ~/.backup-config.json
 
 Then edit `~/.backup-config.json` to taste.
 
-Build the project and do a backup:
+Build the project and show help:
 
     make
+    ./dist/bin/bkup -h
+
+To do a backup:
+
     ./dist/bin/bkup -b
 
 ## Notes on Concurrency and Consistency
