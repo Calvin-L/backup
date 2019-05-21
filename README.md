@@ -39,6 +39,36 @@ To do a backup:
 
     ./dist/bin/bkup -b
 
+## Known Issues
+
+ - Restore is not implemented!  However, the tool can do "spot-checks" to test
+   that a few random files were correctly backed-up.
+ - The tool prompts for passwords and confirmation, so it is not suitable to
+   use in automated scripts (e.g. cron).
+
+## Notes on Cost and Resource Usage
+
+This program uses three AWS services:
+
+ - Glacier (for your file contents)
+ - S3 (for the "index" that maps filesystem paths to contents)
+ - DynamoDB (for reliable interaction with S3, since S3 only offers eventual
+   consistency)
+
+Most of the cost comes from uploading data to Glacier.  There is a per-request
+charge that dominates costs when backing up lots of tiny files.
+
+Running the tool incurs less-than-one-cent cost to S3 and Dynamo.  The tool
+pre-computes an estimate of the Glacier costs and prompts for confirmation if
+it will be more than a penny.  It also displays the monthly maintenance cost
+for the backup.
+
+Other notes:
+
+ - The `--local` flag disables AWS entirely.  The backup and the index will be
+   in /tmp.
+ - The unit tests do not use AWS and can be run for free.
+
 ## Notes on Concurrency and Consistency
 
 The backup process is safe to run on multiple computers simultaneously, or on
@@ -72,3 +102,21 @@ Some things that _are_ ok, on POSIX filesystems:
  - If you delete a file during the backup, then the backup process will either
    backup the old version of the file or it will see the deletion.  It will not
    backup half the file.
+
+## Notes on Security
+
+This project uses [AESCrypt](https://www.aescrypt.com/java_aes_crypt.html) for
+encryption.
+
+In general, Amazon keeps your data relatively secure.  The purpose of the
+encryption is to defend against data breaches and against general nosiness from
+AWS engineers.
+
+Your files are encrypted with individual passwords.  The individual passwords
+are stored in the index in S3, so you must pick a strong password for the
+index!  You can change your password later.  However, it is not clear to me
+how long Amazon retains your data after a deletion, so you should not fudge
+the password from the outset.
+
+Because there is a one-to-one mapping between files and Glacier archives, some
+of your usage patterns are exposed to a motivated attacker.
