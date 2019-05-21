@@ -28,7 +28,7 @@ Configure what files will be backed up:
 
     cp example-config.json ~/.backup-config.json
 
-Then edit `~/.backup-config.json` to taste.
+Then edit `~/.backup-config.json` to taste.  (See "Configuration" below.)
 
 Build the project and show help:
 
@@ -38,6 +38,20 @@ Build the project and show help:
 To do a backup:
 
     ./dist/bin/bkup -b
+
+## Configuration
+
+The configuration file is a JSON document.  The `example-config.json` file
+shows one of my old configurations.
+
+The "system" is an identifier for your computer in case you have multiple
+computers backing up to the same AWS account.  The "rules" describe what should
+be backed up.  Lines starting with "+" are paths to include, while lines
+starting with "-" are paths to exclude.  The rules are applied top-to-bottom,
+meaning that later rules have precedence over earlier rules.
+
+If you aren't sure whether you got your configuration right, you can run the
+tool with `--dry-run` to show what will happen without doing anything.
 
 ## Known Issues
 
