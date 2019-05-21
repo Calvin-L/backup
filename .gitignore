@@ -1,5 +1,5 @@
 # Build products
-/build
+build
 /dist
 /.gradle
 *.jar
