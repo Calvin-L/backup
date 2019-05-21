@@ -134,3 +134,17 @@ the password from the outset.
 
 Because there is a one-to-one mapping between files and Glacier archives, some
 of your usage patterns are exposed to a motivated attacker.
+
+## Notes on Development
+
+This project uses the typical Java directory structure that is way too many
+levels deep.  The source code can be found in `src/main/java/`.  I have done my
+best to put clear docstrings on the important classes and methods, but many are
+still missing.
+
+Key packages and classes:
+
+ - `cal.bkup`: classes related to backups
+   - `Main.java`: program entry point (configuration and command line parsing)
+   - `impls/BackerUpper.java`: main backup logic
+ - `cal.prim`: generic utilities that could be useful to anyone
