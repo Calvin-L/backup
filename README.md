@@ -1,15 +1,17 @@
 # Backup
 
-This is my homemade backup solution.
+This is my homemade backup solution.  It backs up your data to Amazon Glacier
+and encrypts it along the way.
 
 Project goals:
 
  - low-cost
- - cost estimation
+ - ahead-of-time cost estimation
  - all data encrypted on remote store
  - concurrent backups are safe
  - progress meter
  - detection of moved files
+ - handling for symbolic and hard links
  - deduplication
 
 ## "Quick" Start
