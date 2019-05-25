@@ -16,7 +16,10 @@ Project goals:
 
 ## "Quick" Start
 
-You'll need Make, Gradle, and a Java JDK version 10 or higher.
+You'll need Make, Gradle, and a Java JDK version 10 or higher.  Note that [JDK
+10 has reached its end of
+life](https://www.oracle.com/technetwork/java/java-se-support-roadmap.html), so
+I suggest using JDK 11.
 
 Make sure you have a `~/.aws/credentials` file with your AWS credentials:
 
