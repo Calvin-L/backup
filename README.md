@@ -25,13 +25,14 @@ I suggest using JDK 11.
 
 Make sure you have a `~/.aws/credentials` file with your AWS credentials:
 
-    [default]
-    aws_access_key_id=ACCESS_KEY
-    aws_secret_access_key=SECRET_KEY
+    mkdir -p ~/.aws
+    cp -i misc/dummy-credentials ~/.aws/credentials
+
+Then edit `~/.aws/credentials` to contain your actual AWS credentials.
 
 Configure what files will be backed up:
 
-    cp example-config.json ~/.backup-config.json
+    cp misc/example-config.json ~/.backup-config.json
 
 Then edit `~/.backup-config.json` to taste.  (See "Configuration" below.)
 
