@@ -311,6 +311,7 @@ public class Main {
           System.out.println("OK");
         } else {
           System.out.println("got " + remoteSummaries.get(i));
+          ok = false;
         }
       }
 
