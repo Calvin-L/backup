@@ -5,6 +5,12 @@ import cal.bkup.Util;
 import java.time.Duration;
 import java.time.Instant;
 
+/**
+ * A {@link Runnable} wrapper that restricts how often the wrapped instance
+ * can run.  If it is run too often, the extra calls turn into no-ops.
+ *
+ * @see #run()
+ */
 public class RateLimitedRunnable implements Runnable {
 
   public enum Mode {
@@ -22,6 +28,10 @@ public class RateLimitedRunnable implements Runnable {
     this.wrapped = wrapped;
   }
 
+  /**
+   * Run the wrapped instance if it has not been run for the duration specified
+   * in the constructor.
+   */
   @Override
   public void run() {
     Instant now = Instant.now();
