@@ -322,7 +322,10 @@ public class BackupTests {
             Collections.emptyList()).execute();
 
     // Let A finish writing
-    indexDirA.letOneThrough();
+    while (a.isAlive()) {
+      indexDirA.letOneThrough();
+      Thread.sleep(5);
+    }
     a.join();
 
     // Both blobs should be backed up
