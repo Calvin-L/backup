@@ -252,7 +252,7 @@ public class BackupTests {
     }
   }
 
-  @Test(enabled = false)
+  @Test
   public void testConcurrentBackup() throws IOException, InterruptedException, BackupIndex.MergeConflict {
 
     final SystemId systemA = new SystemId("foobar");

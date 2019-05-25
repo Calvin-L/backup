@@ -19,6 +19,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -196,8 +197,87 @@ public class BackupIndex {
     }
   }
 
+  @FunctionalInterface
+  private interface Merger<T> {
+    T merge(T x, T y) throws MergeConflict;
+  }
+
+  private static final class MergeRequiringEquality<T> implements Merger<T> {
+    @Override
+    public T merge(T x, T y) throws MergeConflict {
+      if (Objects.equals(x, y)) {
+        return x;
+      }
+      throw new MergeConflict("not equal: " + x + " and " + y);
+    }
+  }
+
+  private static final class MergeWithArbitraryChoice<T> implements Merger<T> {
+    @Override
+    public T merge(T x, T y) {
+      return x;
+    }
+  }
+
+  private static final class MergeMaps<K, V> implements Merger<Map<K, V>> {
+    private final Merger<V> valueMerger;
+
+    public MergeMaps(Merger<V> valueMerger) {
+      this.valueMerger = valueMerger;
+    }
+
+    @Override
+    public Map<K, V> merge(Map<K, V> x, Map<K, V> y) throws MergeConflict {
+      Map<K, V> result = new HashMap<>(x);
+      for (Map.Entry<K, V> entry : y.entrySet()) {
+        K key = entry.getKey();
+        V val = entry.getValue();
+        if (result.containsKey(key)) {
+          result.put(key, valueMerger.merge(result.get(key), val));
+        } else {
+          result.put(key, val);
+        }
+      }
+      return result;
+    }
+  }
+
+  private static final class MergeLists<T> implements Merger<List<T>> {
+    private final Merger<T> valueMerger;
+
+    public MergeLists(Merger<T> valueMerger) {
+      this.valueMerger = valueMerger;
+    }
+
+    @Override
+    public List<T> merge(List<T> x, List<T> y) throws MergeConflict {
+      final List<T> longerList;
+      final List<T> shorterList;
+      if (x.size() <= y.size()) {
+        shorterList = x;
+        longerList = y;
+      } else {
+        shorterList = y;
+        longerList = x;
+      }
+      final List<T> result = new ArrayList<>(longerList.size());
+      for (int i = 0; i < shorterList.size(); ++i) {
+        result.add(valueMerger.merge(shorterList.get(i), longerList.get(i)));
+      }
+      for (int i = shorterList.size(); i < longerList.size(); ++i) {
+        result.add(longerList.get(i));
+      }
+      return result;
+    }
+  }
+
+  private static final Merger<Map<SystemId, Map<Path, List<Revision>>>> FILE_MERGER = new MergeMaps<>(new MergeMaps<>(new MergeLists<>(new MergeRequiringEquality<>())));
+  private static final Merger<Map<Sha256AndSize, BackupReport>> BLOB_MERGER = new MergeMaps<>(new MergeWithArbitraryChoice<>());
+
   public BackupIndex merge(BackupIndex other) throws MergeConflict {
-    throw new MergeConflict("merge is not implemented yet");
+    final Map<SystemId, Map<Path, List<Revision>>> files = FILE_MERGER.merge(this.files, other.files);
+    final Map<Sha256AndSize, BackupReport> blobs = BLOB_MERGER.merge(this.blobs, other.blobs);
+    return new BackupIndex(files, blobs);
   }
 
 }
