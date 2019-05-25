@@ -44,6 +44,7 @@ import java.util.stream.Stream;
  * atomic.  All query methods return immutable copies of their results, so their
  * answers will not be affected by the actions of other threads in the future.
  */
+@EqualsAndHashCode
 public class BackupIndex {
 
   public enum FileType {
