@@ -21,7 +21,5 @@ before_script:
   - cp misc/dummy-credentials $HOME/.aws/credentials
 
 script:
-  - cat $HOME/.aws/credentials
-  - gradle test -i
   - make test all
   - ./dist/bin/bkup -h
