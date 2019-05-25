@@ -12,3 +12,7 @@ before_install:
   - export GRADLE_HOME=$PWD/gradle-5.3
   - export PATH=$GRADLE_HOME/bin:$PATH
   - gradle -v
+
+script:
+  - make test all
+  - ./dist/bin/bkup -h
