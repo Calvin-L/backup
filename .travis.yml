@@ -2,3 +2,13 @@ language: java
 jdk:
   - oraclejdk11
   - openjdk11
+
+# Set up Gradle version 5.3.
+# Credit to @richiksc:
+# https://travis-ci.community/t/allow-custom-gradle-versions-to-be-specified-in-travis-yml/2751
+before_install:
+  - wget http://services.gradle.org/distributions/gradle-5.3-bin.zip
+  - unzip -qq gradle-5.3-bin.zip
+  - export GRADLE_HOME=$PWD/gradle-5.3
+  - export PATH=$GRADLE_HOME/bin:$PATH
+  - gradle -v
