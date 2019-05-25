@@ -5,6 +5,7 @@ import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SystemId;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.SymLink;
+import cal.prim.storage.ConsistentBlob;
 import com.google.common.collect.ImmutableSet;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
@@ -31,7 +32,7 @@ import java.util.stream.Stream;
  * for each known file {@link Path} on that system.  For each <code>Path</code>, it
  * stores a list of {@link Revision Revisions}.
  *
- * <p>To store an index durably, combine {@link cal.prim.ConsistentBlob} and
+ * <p>To store an index durably, combine {@link ConsistentBlob} and
  * {@link cal.bkup.types.IndexFormat}.
  *
  * <p>The <code>BackupIndex</code> object does not actually back up files.  Any client code

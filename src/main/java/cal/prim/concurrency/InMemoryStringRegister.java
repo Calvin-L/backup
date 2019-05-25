@@ -1,4 +1,6 @@
-package cal.prim;
+package cal.prim.concurrency;
+
+import cal.prim.PreconditionFailed;
 
 import java.util.Objects;
 

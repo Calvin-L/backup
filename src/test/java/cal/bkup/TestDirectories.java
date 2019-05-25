@@ -1,7 +1,7 @@
 package cal.bkup;
 
-import cal.prim.EventuallyConsistentDirectory;
-import cal.prim.InMemoryDir;
+import cal.prim.storage.EventuallyConsistentDirectory;
+import cal.prim.storage.InMemoryDir;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.XZCompression;
 import org.testng.Assert;

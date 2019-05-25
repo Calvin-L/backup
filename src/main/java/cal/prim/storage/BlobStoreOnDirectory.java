@@ -1,4 +1,4 @@
-package cal.prim;
+package cal.prim.storage;
 
 import cal.prim.transforms.StatisticsCollectingInputStream;
 

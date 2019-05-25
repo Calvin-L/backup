@@ -1,4 +1,4 @@
-package cal.prim;
+package cal.prim.storage;
 
 import cal.bkup.Util;
 import org.crashsafeio.AtomicDurableOutputStream;

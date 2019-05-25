@@ -1,5 +1,6 @@
-package cal.prim;
+package cal.prim.concurrency;
 
+import cal.prim.PreconditionFailed;
 import com.amazonaws.services.dynamodbv2.document.DynamoDB;
 import com.amazonaws.services.dynamodbv2.document.Expected;
 import com.amazonaws.services.dynamodbv2.document.Item;

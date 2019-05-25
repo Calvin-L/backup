@@ -1,5 +1,6 @@
-package cal.prim;
+package cal.prim.concurrency;
 
+import cal.prim.PreconditionFailed;
 import org.crashsafeio.DurableIOUtil;
 
 import java.io.IOException;
