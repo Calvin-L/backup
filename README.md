@@ -1,5 +1,7 @@
 # Backup
 
+[![Build Status](https://api.travis-ci.org/Calvin-L/backup.svg?branch=master)](https://travis-ci.org/Calvin-L/backup)
+
 This is my homemade backup solution.  It backs up your data to Amazon Glacier
 and encrypts it along the way.
 
