@@ -7,6 +7,7 @@ import cal.prim.fs.HardLink;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.fs.SymLink;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -45,7 +46,12 @@ public class JsonIndexFormat implements IndexFormat {
     public Set<JsonBlob> blobs = new HashSet<>();
   }
 
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper;
+
+  public JsonIndexFormat() {
+    mapper = new ObjectMapper();
+    mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+  }
 
   @Override
   public BackupIndex load(InputStream data) throws IOException {
