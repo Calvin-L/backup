@@ -28,8 +28,8 @@ public class SQLiteStringRegister implements StringRegister {
     conn.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
 
     try (Statement stmt = conn.createStatement()) {
-      stmt.executeUpdate("CREATE TABLE IF NOT EXISTS tbl (value TEXT)");
-      stmt.executeUpdate("INSERT OR IGNORE INTO tbl (rowid, value) VALUES (0, \"\")");
+      stmt.executeUpdate("CREATE TABLE IF NOT EXISTS tbl (key INT PRIMARY KEY, value TEXT) WITHOUT ROWID");
+      stmt.executeUpdate("INSERT OR IGNORE INTO tbl (key, value) VALUES (0, \"\")");
     }
     conn.commit();
   }
@@ -37,7 +37,7 @@ public class SQLiteStringRegister implements StringRegister {
   @Override
   public String read() throws IOException {
     try (Statement stmt = conn.createStatement()) {
-      try (ResultSet rs = stmt.executeQuery("SELECT value FROM tbl LIMIT 1")) {
+      try (ResultSet rs = stmt.executeQuery("SELECT value FROM tbl WHERE key=0 LIMIT 1")) {
         if (rs.next()) {
           return rs.getString(1);
         }
@@ -51,7 +51,7 @@ public class SQLiteStringRegister implements StringRegister {
   @Override
   public void write(String expectedValue, String newValue) throws IOException, PreconditionFailed {
     Objects.requireNonNull(newValue);
-    try (PreparedStatement stmt = conn.prepareStatement("UPDATE tbl SET value=? WHERE value=?")) {
+    try (PreparedStatement stmt = conn.prepareStatement("UPDATE tbl SET value=? WHERE value=? AND key=0")) {
       stmt.setString(1, newValue);
       stmt.setString(2, expectedValue);
       int rowsChanged = stmt.executeUpdate();
