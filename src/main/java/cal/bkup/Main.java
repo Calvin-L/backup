@@ -276,6 +276,9 @@ public class Main {
         Util.copyStream(in, System.out);
       } catch (NoValue noValue) {
         System.out.println("No backups have ever been made; there is no index.");
+      } catch (ConsistentBlob.TagExpired ignored) {
+        System.out.println("A concurrent backup prevented the index from being read.");
+        System.out.println("You may try again at your leisure.");
       }
     }
 

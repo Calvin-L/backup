@@ -22,6 +22,9 @@ public interface ConsistentBlob {
   interface Tag {
   }
 
+  class TagExpired extends Exception {
+  }
+
   /**
    * @return the tag for the most recent entry
    */
@@ -35,8 +38,10 @@ public interface ConsistentBlob {
    * @return an unbuffered stream to read the entry
    * @throws IOException if something goes wrong
    * @throws NoValue if no value has ever been written
+   * @throws TagExpired if the data associated with the given tag is no longer available
+   *   because a newer version exists
    */
-  InputStream read(Tag entry) throws IOException, NoValue;
+  InputStream read(Tag entry) throws IOException, NoValue, TagExpired;
 
   /**
    * Write a new value.

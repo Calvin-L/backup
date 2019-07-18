@@ -354,17 +354,22 @@ public class BackerUpper {
   // Helpers for managing the index
 
   private Pair<ConsistentBlob.Tag, BackupIndex> readLatestFromIndexStore(String password) throws IOException {
-    var tag = indexStore.head();
-    BackupIndex index;
-    System.out.println("Reading index " + tag + "...");
-    try (InputStream in = transformer.followedBy(new Encryption(password)).unApply(indexStore.read(tag))) {
-      index = indexFormat.load(in);
-      System.out.println(" *** read index");
-    } catch (NoValue noValue) {
-      System.out.println("No index was found; creating a new one");
-      index = new BackupIndex();
+    for (;;) {
+      var tag = indexStore.head();
+      BackupIndex index;
+      System.out.println("Reading index " + tag + "...");
+      try (InputStream in = transformer.followedBy(new Encryption(password)).unApply(indexStore.read(tag))) {
+        index = indexFormat.load(in);
+        System.out.println(" *** read index");
+      } catch (NoValue noValue) {
+        System.out.println("No index was found; creating a new one");
+        index = new BackupIndex();
+      } catch (ConsistentBlob.TagExpired ignored) {
+        System.out.println("The tag expired; retrying...");
+        continue;
+      }
+      return new Pair<>(tag, index);
     }
-    return new Pair<>(tag, index);
   }
 
   private void loadIndexIfMissing(String password) throws IOException {
@@ -375,7 +380,7 @@ public class BackerUpper {
     }
   }
 
-  public InputStream readRawIndex(String password) throws IOException, NoValue {
+  public InputStream readRawIndex(String password) throws IOException, NoValue, ConsistentBlob.TagExpired {
     return transformer.followedBy(new Encryption(password)).unApply(indexStore.read(indexStore.head()));
   }
 

@@ -10,6 +10,7 @@ import lombok.Value;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.ConcurrentModificationException;
@@ -75,12 +76,31 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
   }
 
   @Override
-  public InputStream read(Tag entry) throws IOException, NoValue {
+  public InputStream read(Tag entry) throws IOException, NoValue, TagExpired {
     String id = upcast(entry).id;
     if (associatedClockValue(id) == 0L) {
       throw new NoValue();
     }
-    return directory.open(id);
+    for (;;) {
+      try {
+        return directory.open(id);
+      } catch (NoSuchFileException ignored) {
+        // What went wrong?
+        //  (1) a new version of the object was created and the one
+        //      with tag=`entry` is eligible for garbage collection, or
+        //  (2) the underlying eventually-consistent directory has
+        //      not made our object visible yet.
+        // So, we shall read the current head.  If it isn't equal to the
+        // given entry, then we definitely live in world (1) and we can
+        // inform the client.  Otherwise, we live in world (2) and we
+        // should retry.  (Of course, (1) might become true before we can
+        // retry!)
+        Tag head = head();
+        if (!Objects.equals(head, entry)) {
+          throw new TagExpired();
+        }
+      }
+    }
   }
 
   private void asyncDelete(String name) {

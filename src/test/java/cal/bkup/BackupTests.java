@@ -49,7 +49,7 @@ public class BackupTests {
   };
 
   @Test
-  public void test() throws IOException, NoValue, BackupIndex.MergeConflict {
+  public void test() throws IOException, NoValue, BackupIndex.MergeConflict, ConsistentBlob.TagExpired {
 
     final SystemId system = new SystemId("foobar");
     final String password = "fizzbuzz";
