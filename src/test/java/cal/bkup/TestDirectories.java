@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.NoSuchFileException;
 import java.util.stream.Stream;
 
 @Test
@@ -68,8 +69,12 @@ public class TestDirectories {
       dir.createOrReplace(key, s);
     }
     System.out.println("done");
-    try (BufferedReader r = new BufferedReader(new InputStreamReader(dir.open(key), CHARSET))) {
-      Assert.assertEquals(r.readLine(), text);
+    while (true) {
+      try (BufferedReader r = new BufferedReader(new InputStreamReader(dir.open(key), CHARSET))) {
+        Assert.assertEquals(r.readLine(), text);
+        return;
+      } catch (NoSuchFileException ignored) {
+      }
     }
   }
 
@@ -101,7 +106,14 @@ public class TestDirectories {
     EventuallyConsistentDirectory view = new TransformedDirectory(coreDir, compression.followedBy(encryption));
     byte[] originalBytes = "hello, world".getBytes(CHARSET);
     view.createOrReplace("foo", new ByteArrayInputStream(originalBytes));
-    byte[] rawBytes = Util.read(coreDir.open("foo"));
+    byte[] rawBytes;
+    while (true) {
+      try {
+        rawBytes = Util.read(coreDir.open("foo"));
+        break;
+      } catch (NoSuchFileException ignored) {
+      }
+    }
 
     // The raw bytes can be decrypted...
     byte[] decryptedBytes;
