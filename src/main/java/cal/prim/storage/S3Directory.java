@@ -2,6 +2,7 @@ package cal.prim.storage;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
+import com.amazonaws.AmazonServiceException;
 import com.amazonaws.SdkClientException;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
@@ -16,6 +17,7 @@ import com.amazonaws.services.s3.model.UploadPartResult;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -146,7 +148,18 @@ public class S3Directory implements EventuallyConsistentDirectory {
   public InputStream open(String name) throws IOException {
     try {
       return s3client.getObject(bucket, name).getObjectContent();
+    } catch (AmazonServiceException e) {
+      // "AmazonServiceException" indicates an error response from Amazon.
+      // The status code 404 means "not found".
+      if (e.getStatusCode() == 404) {
+        throw new NoSuchFileException(name);
+      }
+      throw new IOException(e);
     } catch (SdkClientException e) {
+      // "SdkClientException" indicates any other kind of error, including:
+      //   - malformed request
+      //   - network error
+      //   - unable to parse response from Amazon
       throw new IOException(e);
     }
   }
