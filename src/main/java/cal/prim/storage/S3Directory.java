@@ -48,9 +48,16 @@ public class S3Directory implements EventuallyConsistentDirectory {
   }
 
   @Override
-  public Stream<String> list() {
-    return StreamSupport.stream(new Spliterator<String>() {
-      ObjectListing listing = s3client.listObjects(bucket);
+  public Stream<String> list() throws IOException {
+    ObjectListing initialListing;
+    try {
+      initialListing = s3client.listObjects(bucket);
+    } catch (SdkClientException e) {
+      throw new IOException(e);
+    }
+
+    return StreamSupport.stream(new Spliterator<>() {
+      ObjectListing listing = initialListing;
       Iterator<S3ObjectSummary> current = listing.getObjectSummaries().iterator();
 
       @Override
