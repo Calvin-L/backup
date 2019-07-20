@@ -7,9 +7,10 @@ import java.io.InputStream;
 import java.util.stream.Stream;
 
 /**
- * A blob store.
+ * An eventually consistent blob store.
  * Similar to {@link EventuallyConsistentDirectory}, but the store&mdash;not the client code&mdash;picks
- * the names of the blobs.
+ * the names of the blobs.  See the docstrings on {@link EventuallyConsistentDirectory} for more
+ * information about what "eventually consistent" means.
  */
 public interface EventuallyConsistentBlobStore {
 
