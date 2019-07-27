@@ -39,6 +39,11 @@ dependencies {
     compile "com.google.code.findbugs:jsr305:3.0.2"
     compile "com.google.guava:guava:27.1-jre"
     testCompile "org.testng:testng:6.10"
+
+    // The AWS SDK issues a warning if the JAXB classes are not available.
+    // There is a fallback implementation so functionality is not affected,
+    // but the warning is annoying enough to be worth silencing.
+    runtime "javax.xml.bind:jaxb-api:2.3.1"
 }
 
 ////////////////////////// Testing
