@@ -4,6 +4,7 @@ import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormat;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.SystemId;
+import cal.prim.MalformedDataException;
 import cal.prim.fs.SymLink;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -79,7 +80,7 @@ public class IndexTests {
           "}";
 
   @Test
-  public void testRead() throws IOException {
+  public void testRead() throws IOException, MalformedDataException {
     BackupIndex index = FORMAT.load(new ByteArrayInputStream(TEST_INDEX.getBytes(StandardCharsets.UTF_8)));
 
     SystemId system = new SystemId("UWLaptop2");
@@ -95,7 +96,7 @@ public class IndexTests {
   }
 
   @Test
-  public void testRewrite() throws IOException {
+  public void testRewrite() throws IOException, MalformedDataException {
     BackupIndex index1 = FORMAT.load(new ByteArrayInputStream(TEST_INDEX.getBytes(StandardCharsets.UTF_8)));
     byte[] reserialized = Util.read(FORMAT.serialize(index1));
     BackupIndex index2 = FORMAT.load(new ByteArrayInputStream(reserialized));
@@ -103,7 +104,7 @@ public class IndexTests {
   }
 
   @Test
-  public void testReadWithMissingFields() throws IOException {
+  public void testReadWithMissingFields() throws IOException, MalformedDataException {
 
     String text = "{\n" +
             "  \"files\": {\n" +

@@ -3,11 +3,14 @@ package cal.bkup.impls;
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.SystemId;
+import cal.prim.MalformedDataException;
 import cal.prim.fs.HardLink;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.prim.fs.SymLink;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -54,8 +57,15 @@ public class JsonIndexFormat implements IndexFormat {
   }
 
   @Override
-  public BackupIndex load(InputStream data) throws IOException {
-    Format f = mapper.readValue(data, Format.class);
+  public BackupIndex load(InputStream data) throws IOException, MalformedDataException {
+    final Format f;
+    try {
+      f = mapper.readValue(data, Format.class);
+    } catch (JsonParseException e) {
+      throw new MalformedDataException("Backup index is not legal JSON", e);
+    } catch (JsonMappingException e) {
+      throw new MalformedDataException("Backup index JSON is not well-formed", e);
+    }
     BackupIndex index = new BackupIndex();
     for (JsonBlob blob : f.blobs) {
       index.addBackedUpBlob(

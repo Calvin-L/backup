@@ -6,6 +6,7 @@ import cal.bkup.types.SystemId;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
+import cal.prim.MalformedDataException;
 import cal.prim.storage.ConsistentBlob;
 import cal.prim.storage.EventuallyConsistentBlobStore;
 import cal.prim.NoValue;
@@ -449,6 +450,8 @@ public class BackerUpper {
       } catch (ConsistentBlob.TagExpired ignored) {
         System.out.println("The tag expired; retrying...");
         continue;
+      } catch (MalformedDataException e) {
+        throw new IllegalStateException("The index appears to have become corrupt!", e);
       }
       return new Pair<>(tag, index);
     }
