@@ -1,7 +1,7 @@
 package cal.bkup;
 
 import cal.bkup.impls.BackupIndex;
-import cal.bkup.impls.JsonIndexFormat;
+import cal.bkup.impls.JsonIndexFormatV01;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
@@ -20,7 +20,7 @@ import java.util.HashSet;
 @Test
 public class IndexTests {
 
-  private final IndexFormat FORMAT = new JsonIndexFormat();
+  private final IndexFormat FORMAT = new JsonIndexFormatV01();
 
   private final String TEST_INDEX = "{\n" +
           "  \"files\": {\n" +

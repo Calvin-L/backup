@@ -2,7 +2,7 @@ package cal.bkup;
 
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
-import cal.bkup.impls.JsonIndexFormat;
+import cal.bkup.impls.JsonIndexFormatV01;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SystemId;
@@ -73,7 +73,7 @@ public class BackupTests {
     BlobTransformer transform = new XZCompression();
     BackerUpper backup = new BackerUpper(
             indexStore,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
 
@@ -111,7 +111,7 @@ public class BackupTests {
     // restore of index should work
     BackerUpper other = new BackerUpper(
             indexStore,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
 
@@ -152,7 +152,7 @@ public class BackupTests {
     // assert loadable
     backup = new BackerUpper(
             indexStore,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
     backup.list(newPassword).forEach(info -> {
@@ -173,7 +173,7 @@ public class BackupTests {
     BlobTransformer transform = new XZCompression();
     BackerUpper backup = new BackerUpper(
             indexStore,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
 
@@ -282,12 +282,12 @@ public class BackupTests {
     BlobTransformer transform = new XZCompression();
     BackerUpper backupA = new BackerUpper(
             indexStoreA,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
     BackerUpper backupB = new BackerUpper(
             indexStoreB,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
 
@@ -346,7 +346,7 @@ public class BackupTests {
 
     BackerUpper backupC = new BackerUpper(
             indexStoreB,
-            new JsonIndexFormat(),
+            new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
             transform);
 

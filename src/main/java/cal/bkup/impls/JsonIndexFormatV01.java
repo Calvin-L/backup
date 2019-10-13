@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class JsonIndexFormat implements IndexFormat {
+public class JsonIndexFormatV01 implements IndexFormat {
 
   private static class Revision {
     public BigInteger modTimeAsMillisecondsSinceEpoch;
@@ -51,7 +51,7 @@ public class JsonIndexFormat implements IndexFormat {
 
   private final ObjectMapper mapper;
 
-  public JsonIndexFormat() {
+  public JsonIndexFormatV01() {
     mapper = new ObjectMapper();
     mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
   }
