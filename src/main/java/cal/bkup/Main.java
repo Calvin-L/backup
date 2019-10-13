@@ -268,7 +268,7 @@ public class Main {
     }
 
     if (gc) {
-      backupper.cleanup(!dryRun, Duration.ofDays(60));
+      backupper.cleanup(!dryRun, newPassword, Duration.ofDays(60));
     }
 
     if (dumpIndex) {

@@ -191,6 +191,10 @@ public class BackupIndex {
     findOrAddRevisionList(system, path).add(new Revision());
   }
 
+  public synchronized void forgetOldestRevision(SystemId system, Path path) {
+    files.get(system).get(path).remove(0);
+  }
+
   public static class MergeConflict extends Exception {
     public MergeConflict(String message) {
       super(message);

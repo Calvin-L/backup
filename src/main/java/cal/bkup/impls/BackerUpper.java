@@ -271,17 +271,99 @@ public class BackerUpper {
    * <code>retentionTime</code>.
    *
    * @param forReal true to actually clean up, or false for a "dry run" that only prints what would be done
+   * @param password the password to decrypt/encrypt the index
    * @param retentionTime how far back to keep snapshots of files
    * @throws IOException if an error occurs during cleanup.  This is an "ambiguous" outcome: the cleanup might
    *   only partially happen.  Some of the cleanup that was incomplete might happen in the future.  This
    *   exception can be thrown even if <code>forReal == false</code>, indicating that something went wrong
    *   while determining what can be cleaned up.
    */
-  public void cleanup(boolean forReal, Duration retentionTime) throws IOException {
+  public void cleanup(boolean forReal, String password, Duration retentionTime) throws IOException {
     indexStore.cleanup(forReal);
+    loadIndexIfMissing(password);
+    var cutoff = Instant.now().minus(retentionTime);
+
+    for (SystemId system : index.knownSystems()) {
+      for (Path path : Util.sorted(index.knownPaths(system))) {
+        var revisions = index.getInfo(system, path);
+        int numToForget = 0;
+        for (int i = 0; i < revisions.size(); ++i) {
+          if (!canCleanup(revisions, i, cutoff)) {
+            break;
+          }
+          var revision = revisions.get(i);
+          System.out.print("cleaning up " + path);
+          switch (revision.type) {
+            case REGULAR_FILE:
+              System.out.println(" (regular file, last modified " + revision.modTime + ')');
+              var nextRevision = revisions.get(i+1);
+              if (nextRevision.type.equals(BackupIndex.FileType.REGULAR_FILE)) {
+                System.out.println("  --> shasum " +
+                        Util.sha256toString(revision.summary.getSha256()) + " --> " +
+                        Util.sha256toString(nextRevision.summary.getSha256()));
+              } else {
+                System.out.println("  --> next revision " + nextRevision);
+              }
+              break;
+            case HARD_LINK:
+              System.out.println(" (hard link to " + revision.linkTarget + ')');
+              break;
+            case SOFT_LINK:
+              System.out.println(" (soft link to " + revision.linkTarget + ')');
+              break;
+            case TOMBSTONE:
+              System.out.println(" (tombstone marker)");
+              break;
+            default:
+              System.out.println();
+              break;
+          }
+          ++numToForget;
+        }
+
+        // TODO: this is wrong!
+        // (1) We might delete the last reference to a file when there is a hard link
+        //     to its contents...?
+        // (2) We can't safely delete any blobs concurrently!
+
+//        if (forReal) {
+//          for (int i = 0; i < numToForget; ++i) {
+//            index.forgetOldestRevision(system, path);
+//          }
+//        }
+
+      }
+    }
+
     // TODO: prune old data from BackupIndex
     // TODO: when can we delete things in the blob store?
     throw new UnsupportedOperationException();
+  }
+
+  /**
+   * Assuming that revisions 0 to <code>i-1</code> (inclusive) are
+   * going to be cleaned up, can revision <code>i</code> be cleaned
+   * up?
+   *
+   * @param revisions a list of revisions to consider
+   * @param i the index of the revision to check
+   * @param cutoff the "cutoff" time: revisions newer than this must be kept
+   * @return whether <code>revisions[i]</code> can be cleaned up
+   */
+  private boolean canCleanup(List<BackupIndex.Revision> revisions, int i, Instant cutoff) {
+    var revision = revisions.get(i);
+    boolean hasNextRevision = i < (revisions.size() - 1);
+    switch (revision.type) {
+      case REGULAR_FILE:
+        return revision.modTime.isBefore(cutoff) && hasNextRevision;
+      case HARD_LINK:
+      case SOFT_LINK:
+        return hasNextRevision;
+      case TOMBSTONE:
+        return true;
+      default:
+        throw new IllegalArgumentException("unknown type for revision " + revision);
+    }
   }
 
   // -------------------------------------------------------------------------

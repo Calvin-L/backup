@@ -18,7 +18,11 @@ import java.io.PipedOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -323,6 +327,12 @@ public abstract class Util {
       chars[i] = PASSWORD_CHARS.charAt(SECURE_RANDOM.nextInt(PASSWORD_CHARS.length()));
     }
     return new String(chars);
+  }
+
+  public static <T extends Comparable<T>> List<T> sorted(Collection<T> elements) {
+    var result = new ArrayList<>(elements);
+    result.sort(Comparator.naturalOrder());
+    return result;
   }
 
 }
