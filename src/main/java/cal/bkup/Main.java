@@ -3,6 +3,7 @@ package cal.bkup;
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormatV01;
+import cal.bkup.impls.JsonIndexFormatV02;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.VersionedIndexFormat;
 import cal.bkup.types.Config;
@@ -182,7 +183,8 @@ public class Main {
 
     final BlobTransformer transform = new XZCompression();
     final IndexFormat indexFormat = new VersionedIndexFormat(
-            new JsonIndexFormatV01());
+            new JsonIndexFormatV01(),
+            new JsonIndexFormatV02());
     final BackerUpper backupper;
 
     if (local) {

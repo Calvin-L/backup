@@ -4,6 +4,7 @@ import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
+import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -11,6 +12,8 @@ import org.testng.annotations.Test;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -29,15 +32,32 @@ public class VersionedIndexFormatTests {
 
   }
 
-  @Test
-  public void testMultiVersionSerialization() throws IOException, MalformedDataException {
+  static BackupIndex createTestIndex() {
 
     byte[] blob = new byte[] { (byte)0x11 };
 
     BackupIndex index = new BackupIndex();
+    Sha256AndSize summary = null;
+    try {
+      summary = new Sha256AndSize(Util.sha256(new ByteArrayInputStream(blob)), blob.length);
+    } catch (IOException e) {
+      throw new RuntimeException("insanity: reading from a byte array produced an IOException", e);
+    }
     index.addBackedUpBlob(
-            new Sha256AndSize(Util.sha256(new ByteArrayInputStream(blob)), blob.length),
+            summary,
             new BackupReport("foo", 10, "backupname"));
+
+    var system = new SystemId("test-system");
+    var backup = index.startBackup(system, Instant.now());
+    index.appendRevision(system, backup, Paths.get("/tmp/foo"), Instant.now(), summary);
+    index.finishBackup(system, backup, Instant.now());
+
+    return index;
+  }
+
+  @Test
+  public void testMultiVersionSerialization() throws IOException, MalformedDataException {
+    BackupIndex index = createTestIndex();
 
     IndexFormat magicalFutureFormat = new IndexFormat() {
       @Override
@@ -53,6 +73,7 @@ public class VersionedIndexFormatTests {
 
     IndexFormat[] versions = new IndexFormat[] {
             new JsonIndexFormatV01(),
+            new JsonIndexFormatV02(),
             magicalFutureFormat
     };
 
@@ -67,7 +88,14 @@ public class VersionedIndexFormatTests {
       for (int fmtB = fmtA; fmtB < versionsToTest.size(); ++fmtB) {
         System.out.println("Checking migration from " + fmtA + " to " + fmtB);
         byte[] serialized = Util.read(versionsToTest.get(fmtA).serialize(index));
-        Assert.assertEquals(versionsToTest.get(fmtB).load(new ByteArrayInputStream(serialized)), index);
+
+        // NOTE: This test ensures that version B reads the index in the same way as version A.
+        // It does NOT ensure that they both read the correct index.  This is because some old
+        // formats drop information from the index during serialization, so it actually isn't
+        // true that they produce the correct result.  Only the latest format is expected to be
+        // able to flawlessly reproduce the index.
+        BackupIndex expected = versionsToTest.get(fmtA).load(new ByteArrayInputStream(serialized));
+        Assert.assertEquals(versionsToTest.get(fmtB).load(new ByteArrayInputStream(serialized)), expected);
       }
     }
 

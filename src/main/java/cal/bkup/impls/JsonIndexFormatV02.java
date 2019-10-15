@@ -13,6 +13,7 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
@@ -26,11 +27,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class JsonIndexFormatV01 implements IndexFormat {
+public class JsonIndexFormatV02 implements IndexFormat {
 
-  private final Instant UNKNOWN_TIME = Instant.EPOCH;
+  private static class JsonBackupInfo {
+    public BigInteger startTimeAsMillisecondsSinceEpoch;
+    public BigInteger endTimeAsMillisecondsSinceEpoch;
+    public long backupNumber;
+  }
 
-  private static class Revision {
+  private static class JsonRevision {
+    public long backupNumber;
     public BigInteger modTimeAsMillisecondsSinceEpoch;
     public String sha256;
     public long size;
@@ -46,23 +52,28 @@ public class JsonIndexFormatV01 implements IndexFormat {
     public long backupSize;
   }
 
-  private static class Format {
-    public Map<String, Map<String, List<Revision>>> files = new HashMap<>();
+  private static class JsonIndex {
+    public Map<String, List<JsonBackupInfo>> history = new HashMap<>();
+    public Map<String, Map<String, List<JsonRevision>>> files = new HashMap<>();
     public Set<JsonBlob> blobs = new HashSet<>();
   }
 
   private final ObjectMapper mapper;
 
-  public JsonIndexFormatV01() {
+  public JsonIndexFormatV02() {
     mapper = new ObjectMapper();
     mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
   }
 
+  private @Nullable Instant instantFromInteger(@Nullable BigInteger millisecondsSinceEpoch) {
+    return millisecondsSinceEpoch == null ? null : Instant.ofEpochMilli(millisecondsSinceEpoch.longValueExact());
+  }
+
   @Override
   public BackupIndex load(InputStream data) throws IOException, MalformedDataException {
-    final Format f;
+    final JsonIndex f;
     try {
-      f = mapper.readValue(data, Format.class);
+      f = mapper.readValue(data, JsonIndex.class);
     } catch (JsonParseException e) {
       throw new MalformedDataException("Backup index is not legal JSON", e);
     } catch (JsonMappingException e) {
@@ -74,15 +85,22 @@ public class JsonIndexFormatV01 implements IndexFormat {
               new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size),
               new BackupReport(blob.backupId, blob.backupSize, blob.key));
     }
+    for (var entry : f.history.entrySet()) {
+      for (JsonBackupInfo b : entry.getValue()) {
+        index.addBackupInfo(
+                new SystemId(entry.getKey()),
+                new BackupIndex.BackupMetadata(instantFromInteger(b.startTimeAsMillisecondsSinceEpoch), instantFromInteger(b.endTimeAsMillisecondsSinceEpoch), b.backupNumber));
+      }
+    }
     Map<SystemId, BackupIndex.BackupMetadata> meta = new HashMap<>();
-    for (Map.Entry<String, Map<String, List<Revision>>> entry : f.files.entrySet()) {
+    for (Map.Entry<String, Map<String, List<JsonRevision>>> entry : f.files.entrySet()) {
       SystemId system = new SystemId(entry.getKey());
-      final var backup = meta.computeIfAbsent(system, s -> index.startBackup(system, UNKNOWN_TIME));
-      for (Map.Entry<String, List<Revision>> entry2 : entry.getValue().entrySet()) {
+      for (Map.Entry<String, List<JsonRevision>> entry2 : entry.getValue().entrySet()) {
         Path path = Paths.get(entry2.getKey());
-        for (Revision rev : entry2.getValue()) {
+        for (JsonRevision rev : entry2.getValue()) {
+          final var backup = index.findBackup(system, rev.backupNumber);
           if (rev.sha256 != null) {
-            Instant modTime = Instant.ofEpochMilli(rev.modTimeAsMillisecondsSinceEpoch.longValueExact());
+            Instant modTime = instantFromInteger(rev.modTimeAsMillisecondsSinceEpoch);
             index.appendRevision(system, backup, path, modTime, new Sha256AndSize(Util.stringToSha256(rev.sha256), rev.size));
           } else if (rev.symLinkDst != null) {
             Path p = Paths.get(rev.symLinkDst);
@@ -96,14 +114,17 @@ public class JsonIndexFormatV01 implements IndexFormat {
         }
       }
     }
-    for (var entry : meta.entrySet()) {
-      index.finishBackup(entry.getKey(), entry.getValue(), UNKNOWN_TIME);
-    }
     return index;
   }
 
-  private Format simplify(BackupIndex index) {
-    Format result = new Format();
+  private JsonIndex convertToJSONSerializableObject(BackupIndex index) {
+    JsonIndex result = new JsonIndex();
+
+    index.knownSystems().forEach(system -> {
+      for (var info : index.knownBackups(system)) {
+        result.history.computeIfAbsent(system.toString(), s -> new ArrayList<>()).add(toJsonMeta(info));
+      }
+    });
 
     index.listBlobs().forEach(b -> {
       JsonBlob blob = new JsonBlob();
@@ -118,9 +139,9 @@ public class JsonIndexFormatV01 implements IndexFormat {
     });
 
     index.knownSystems().forEach(system -> {
-      Map<String, List<Revision>> m = result.files.computeIfAbsent(system.toString(), s -> new HashMap<>());
+      Map<String, List<JsonRevision>> m = result.files.computeIfAbsent(system.toString(), s -> new HashMap<>());
       index.knownPaths(system).forEach(path -> {
-        List<Revision> l = m.computeIfAbsent(path.toString(), p -> new ArrayList<>());
+        List<JsonRevision> l = m.computeIfAbsent(path.toString(), p -> new ArrayList<>());
         for (BackupIndex.Revision r : index.getInfo(system, path)) {
           l.add(toJsonRevision(r));
         }
@@ -130,8 +151,17 @@ public class JsonIndexFormatV01 implements IndexFormat {
     return result;
   }
 
-  private static Revision toJsonRevision(BackupIndex.Revision r) {
-    Revision res = new Revision();
+  private JsonBackupInfo toJsonMeta(BackupIndex.BackupMetadata info) {
+    JsonBackupInfo res = new JsonBackupInfo();
+    res.startTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(info.getStartTime().toEpochMilli());
+    res.endTimeAsMillisecondsSinceEpoch = info.getEndTime() == null ? null : BigInteger.valueOf(info.getEndTime().toEpochMilli());
+    res.backupNumber = info.getBackupNumber();
+    return res;
+  }
+
+  private static JsonRevision toJsonRevision(BackupIndex.Revision r) {
+    JsonRevision res = new JsonRevision();
+    res.backupNumber = r.backupNumber;
     switch (r.type) {
       case REGULAR_FILE:
         res.modTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(r.modTime.toEpochMilli());
@@ -154,7 +184,7 @@ public class JsonIndexFormatV01 implements IndexFormat {
 
   @Override
   public InputStream serialize(BackupIndex index) {
-    return Util.createInputStream(out -> mapper.writeValue(out, simplify(index)));
+    return Util.createInputStream(out -> mapper.writeValue(out, convertToJSONSerializableObject(index)));
   }
 
 }

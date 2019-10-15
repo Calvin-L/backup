@@ -162,17 +162,20 @@ public class BackerUpper {
       System.err.println("Shutting down...");
       keepRunning.set(false);
     })) {
+      BackupIndex.BackupMetadata backupId = null;
+
       try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
         loadIndexIfMissing(currentPassword);
 
         Instant lastIndexSave = Instant.now();
+        backupId = index.startBackup(whatSystemIsThis, lastIndexSave);
 
         for (var f : files) {
           if (!keepRunning.get()) {
             return;
           }
           try {
-            uploadAndAddToIndex(index, whatSystemIsThis, f, progress);
+            uploadAndAddToIndex(index, whatSystemIsThis, backupId, f, progress);
           } catch (NoSuchFileException ignored2) {
             warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
           }
@@ -191,7 +194,7 @@ public class BackerUpper {
             progress.finishTask(task);
             continue;
           }
-          index.appendRevision(whatSystemIsThis, link.getSource(), link);
+          index.appendRevision(whatSystemIsThis, backupId, link.getSource(), link);
           progress.finishTask(task);
         }
 
@@ -202,16 +205,19 @@ public class BackerUpper {
             progress.finishTask(task);
             continue;
           }
-          index.appendRevision(whatSystemIsThis, link.getSource(), link);
+          index.appendRevision(whatSystemIsThis, backupId, link.getSource(), link);
           progress.finishTask(task);
         }
 
         for (Path p : toForget) {
-          index.appendTombstone(whatSystemIsThis, p);
+          index.appendTombstone(whatSystemIsThis, backupId, p);
         }
       } finally {
         try {
-          saveIndex(currentPassword, newPasswordForIndex);
+          if (backupId != null) {
+            index.finishBackup(whatSystemIsThis, backupId, Instant.now());
+            saveIndex(currentPassword, newPasswordForIndex);
+          }
         } finally {
           if (warnings.size() > 0) {
             System.out.println(warnings.size() + " warnings:");
@@ -379,7 +385,7 @@ public class BackerUpper {
    * @throws NoSuchFileException if another process deletes the file before or during upload
    * @throws IOException
    */
-  private void uploadAndAddToIndex(BackupIndex index, SystemId systemId, RegularFile f, ProgressDisplay display) throws IOException {
+  private void uploadAndAddToIndex(BackupIndex index, SystemId systemId, BackupIndex.BackupMetadata backupId, RegularFile f, ProgressDisplay display) throws IOException {
     // (1) Get the modification time.
     // This has to happen before computing the checksum.  Otherwise,
     // we might miss a new revision of the file on a future backup.
@@ -430,7 +436,7 @@ public class BackerUpper {
     }
 
     // Record the latest details.
-    index.appendRevision(systemId, f.getPath(), modTime, summary);
+    index.appendRevision(systemId, backupId, f.getPath(), modTime, summary);
   }
 
   // -------------------------------------------------------------------------

@@ -6,9 +6,12 @@ import cal.bkup.types.SystemId;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import lombok.EqualsAndHashCode;
+import lombok.NonNull;
 import lombok.ToString;
+import lombok.Value;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
@@ -19,6 +22,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -58,6 +62,7 @@ public class BackupIndex {
   @ToString
   @EqualsAndHashCode
   public static class Revision {
+    public final long backupNumber;
     public final FileType type;
 
     // type is REGULAR_FILE
@@ -68,30 +73,39 @@ public class BackupIndex {
     public final Sha256AndSize summary;
 
     // type is SOFT_LINK or HARD_LINK
+    /**
+     * The link target.  The link target may have multiple revisions; if so,
+     * this entry refers to the revision at with the same {@link #backupNumber}
+     * as this one (or the latest revision that is not newer than this one).
+     */
     public final Path linkTarget;
 
-    private Revision() {
+    private Revision(long backupNumber) {
+      this.backupNumber = backupNumber;
       this.type = FileType.TOMBSTONE;
       this.modTime = null;
       this.summary = null;
       this.linkTarget = null;
     }
 
-    private Revision(Instant modTime, Sha256AndSize summary) {
+    private Revision(long backupNumber, Instant modTime, Sha256AndSize summary) {
+      this.backupNumber = backupNumber;
       this.type = FileType.REGULAR_FILE;
       this.modTime = modTime;
       this.summary = summary;
       this.linkTarget = null;
     }
 
-    public Revision(SymLink link) {
+    public Revision(long backupNumber, SymLink link) {
+      this.backupNumber = backupNumber;
       this.type = FileType.SOFT_LINK;
       this.modTime = null;
       this.summary = null;
       this.linkTarget = link.getDestination();
     }
 
-    public Revision(HardLink link) {
+    public Revision(long backupNumber, HardLink link) {
+      this.backupNumber = backupNumber;
       this.type = FileType.HARD_LINK;
       this.modTime = null;
       this.summary = null;
@@ -99,14 +113,26 @@ public class BackupIndex {
     }
   }
 
+  @Value
+  public static class BackupMetadata {
+    @NonNull Instant startTime;
+    @Nullable Instant endTime;
+    long backupNumber;
+  }
+
+  private final Map<SystemId, List<BackupMetadata>> backupHistory;
   private final Map<SystemId, Map<Path, List<Revision>>> files;
   private final Map<Sha256AndSize, BackupReport> blobs;
 
   public BackupIndex() {
-    this(new HashMap<>(), new HashMap<>());
+    this(new HashMap<>(), new HashMap<>(), new HashMap<>());
   }
 
-  private BackupIndex(Map<SystemId, Map<Path, List<Revision>>> data, Map<Sha256AndSize, BackupReport> blobs) {
+  private BackupIndex(
+          Map<SystemId, List<BackupMetadata>> backupHistory,
+          Map<SystemId, Map<Path, List<Revision>>> data,
+          Map<Sha256AndSize, BackupReport> blobs) {
+    this.backupHistory = backupHistory;
     this.files = data;
     this.blobs = blobs;
   }
@@ -134,6 +160,20 @@ public class BackupIndex {
     return ImmutableSet.copyOf(files.keySet());
   }
 
+  public synchronized BackupMetadata findBackup(SystemId system, long backupNumber) {
+    for (var backup : backupHistory.getOrDefault(system, Collections.emptyList())) {
+      if (backup.getBackupNumber() == backupNumber) {
+        return backup;
+      }
+    }
+    throw new NoSuchElementException("No backup with number " + backupNumber + " on system " + system);
+  }
+
+  public synchronized List<BackupMetadata> knownBackups(SystemId system) {
+    var backups = backupHistory.get(system);
+    return backups != null ? ImmutableList.copyOf(backups) : Collections.emptyList();
+  }
+
   public synchronized Set<Path> knownPaths(SystemId system) {
     Map<Path, List<Revision>> info = files.get(system);
     return info != null ? ImmutableSet.copyOf(info.keySet()) : Collections.emptySet();
@@ -148,12 +188,53 @@ public class BackupIndex {
     return revisions != null ? new ArrayList<>(revisions) : Collections.emptyList();
   }
 
+  private <T> T lastEntry(List<T> list) {
+    return list.get(list.size() - 1);
+  }
+
   public synchronized @Nullable Revision mostRecentRevision(SystemId system, Path path) {
     List<Revision> revisions = getInfo(system, path);
     if (revisions.isEmpty()) {
       return null;
     }
-    return revisions.get(revisions.size() - 1);
+    return lastEntry(revisions);
+  }
+
+  public synchronized void addBackupInfo(SystemId system, BackupMetadata info) {
+    backupHistory.computeIfAbsent(system, s -> new ArrayList<>()).add(info);
+  }
+
+  public synchronized BackupMetadata startBackup(SystemId system, Instant now) {
+    now = now.truncatedTo(ChronoUnit.MILLIS);
+    List<BackupMetadata> history = backupHistory.computeIfAbsent(system, s -> new ArrayList<>());
+    BackupMetadata result =
+            history.isEmpty()
+                    ? new BackupMetadata(now, null, 0)
+                    : new BackupMetadata(now, null, lastEntry(history).getBackupNumber() + 1);
+    history.add(result);
+    return result;
+  }
+
+  public synchronized void finishBackup(SystemId system, BackupMetadata info, Instant now) {
+    now = now.truncatedTo(ChronoUnit.MILLIS);
+    List<BackupMetadata> history = backupHistory.get(system);
+    if (history == null) {
+      throw new IllegalArgumentException("No backup history for system " + system);
+    }
+    for (int i = 0; i < history.size(); ++i) {
+      BackupMetadata old = history.get(i);
+      if (old.getBackupNumber() == info.getBackupNumber()) {
+        if (old.getEndTime() != null) {
+          throw new IllegalStateException("The backup " + info + " was already finished");
+        }
+        history.set(i, new BackupMetadata(
+                old.getStartTime(),
+                now,
+                old.getBackupNumber()));
+        return;
+      }
+    }
+    throw new IllegalArgumentException("The backup metadata " + info + " is not known");
   }
 
   private List<Revision> findOrAddRevisionList(SystemId system, Path path) {
@@ -171,24 +252,24 @@ public class BackupIndex {
    * @param modTime the file's modification time
    * @param contentSummary a summary of the file's contents on disk
    */
-  public synchronized void appendRevision(SystemId system, Path path, Instant modTime, Sha256AndSize contentSummary) {
+  public synchronized void appendRevision(SystemId system, BackupMetadata backup, Path path, Instant modTime, Sha256AndSize contentSummary) {
     if (lookupBlob(contentSummary) == null) {
       throw new IllegalArgumentException("Refusing to add backed up file that references nonexistent blob " + contentSummary);
     }
     modTime = modTime.truncatedTo(ChronoUnit.MILLIS);
-    findOrAddRevisionList(system, path).add(new Revision(modTime, contentSummary));
+    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber(), modTime, contentSummary));
   }
 
-  public synchronized void appendRevision(SystemId system, Path path, HardLink link) {
-    findOrAddRevisionList(system, path).add(new Revision(link));
+  public synchronized void appendRevision(SystemId system, BackupMetadata backup, Path path, HardLink link) {
+    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber(), link));
   }
 
-  public synchronized void appendRevision(SystemId system, Path path, SymLink link) {
-    findOrAddRevisionList(system, path).add(new Revision(link));
+  public synchronized void appendRevision(SystemId system, BackupMetadata backup, Path path, SymLink link) {
+    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber(), link));
   }
 
-  public synchronized void appendTombstone(SystemId system, Path path) {
-    findOrAddRevisionList(system, path).add(new Revision());
+  public synchronized void appendTombstone(SystemId system, BackupMetadata backup, Path path) {
+    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber()));
   }
 
   public synchronized void forgetOldestRevision(SystemId system, Path path) {
@@ -275,13 +356,15 @@ public class BackupIndex {
     }
   }
 
+  private static final Merger<Map<SystemId, List<BackupMetadata>>> BACKUP_MERGER = new MergeMaps<>(new MergeLists<>(new MergeRequiringEquality<>()));
   private static final Merger<Map<SystemId, Map<Path, List<Revision>>>> FILE_MERGER = new MergeMaps<>(new MergeMaps<>(new MergeLists<>(new MergeRequiringEquality<>())));
   private static final Merger<Map<Sha256AndSize, BackupReport>> BLOB_MERGER = new MergeMaps<>(new MergeWithArbitraryChoice<>());
 
   public BackupIndex merge(BackupIndex other) throws MergeConflict {
+    final Map<SystemId, List<BackupMetadata>> backups = BACKUP_MERGER.merge(this.backupHistory, other.backupHistory);
     final Map<SystemId, Map<Path, List<Revision>>> files = FILE_MERGER.merge(this.files, other.files);
     final Map<Sha256AndSize, BackupReport> blobs = BLOB_MERGER.merge(this.blobs, other.blobs);
-    return new BackupIndex(files, blobs);
+    return new BackupIndex(backups, files, blobs);
   }
 
 }

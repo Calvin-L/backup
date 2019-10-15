@@ -1,7 +1,6 @@
-package cal.bkup;
+package cal.bkup.impls;
 
-import cal.bkup.impls.BackupIndex;
-import cal.bkup.impls.JsonIndexFormatV01;
+import cal.bkup.Util;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
@@ -18,7 +17,7 @@ import java.util.Collections;
 import java.util.HashSet;
 
 @Test
-public class IndexTests {
+public class JsonIndexFormatV01Tests {
 
   private final IndexFormat FORMAT = new JsonIndexFormatV01();
 
@@ -91,7 +90,7 @@ public class IndexTests {
             Paths.get("/Users/loncaric/src/backup/config.json"))));
 
     Assert.assertEquals(index.getInfo(system, Paths.get("/Users/loncaric/src/backup/config.json")), Collections.singletonList(
-            new BackupIndex.Revision(new SymLink(Paths.get("/Users/loncaric/src/backup/config.json"), Paths.get("/Users/loncaric/.backup-config.json")))
+            new BackupIndex.Revision(0, new SymLink(Paths.get("/Users/loncaric/src/backup/config.json"), Paths.get("/Users/loncaric/.backup-config.json")))
     ));
   }
 
@@ -163,7 +162,7 @@ public class IndexTests {
             Paths.get("/Users/loncaric/src/backup/config.json"))));
 
     Assert.assertEquals(index.getInfo(system, Paths.get("/Users/loncaric/src/backup/config.json")), Collections.singletonList(
-            new BackupIndex.Revision(new SymLink(Paths.get("/Users/loncaric/src/backup/config.json"), Paths.get("/Users/loncaric/.backup-config.json")))
+            new BackupIndex.Revision(0, new SymLink(Paths.get("/Users/loncaric/src/backup/config.json"), Paths.get("/Users/loncaric/.backup-config.json")))
     ));
 
   }
