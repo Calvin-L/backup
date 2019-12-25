@@ -44,6 +44,11 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
   @Value
   private static class MyTag implements Tag {
     @NonNull String id;
+
+    @Override
+    public String toString() {
+      return id;
+    }
   }
 
   private MyTag upcast(Tag tag) {
