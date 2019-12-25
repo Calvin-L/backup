@@ -24,8 +24,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PushbackInputStream;
-import java.io.UnsupportedEncodingException;
 import java.net.NetworkInterface;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
@@ -265,9 +265,8 @@ public class AESCrypt {
 	/**
 	 * Builds an object to encrypt or decrypt files with the given password.
 	 * @throws GeneralSecurityException if the platform does not support the required cryptographic methods.
-	 * @throws UnsupportedEncodingException if UTF-16 encoding is not supported.
 	 */
-	public AESCrypt(String password) throws GeneralSecurityException, UnsupportedEncodingException {
+	public AESCrypt(String password) throws GeneralSecurityException {
 		this(false, password);
 	}
 
@@ -275,9 +274,8 @@ public class AESCrypt {
 	/**
 	 * Builds an object to encrypt or decrypt files with the given password.
 	 * @throws GeneralSecurityException if the platform does not support the required cryptographic methods.
-	 * @throws UnsupportedEncodingException if UTF-16 encoding is not supported.
 	 */
-	public AESCrypt(boolean debug, String password) throws GeneralSecurityException, UnsupportedEncodingException {
+	public AESCrypt(boolean debug, String password) throws GeneralSecurityException {
 		try {
 			DEBUG = debug;
 			setPassword(password);
@@ -293,10 +291,9 @@ public class AESCrypt {
 
 	/**
 	 * Changes the password this object uses to encrypt and decrypt.
-	 * @throws UnsupportedEncodingException if UTF-16 encoding is not supported.
 	 */
-	public void setPassword(String password) throws UnsupportedEncodingException {
-		this.password = password.getBytes("UTF-16LE");
+	public void setPassword(String password) {
+		this.password = password.getBytes(StandardCharsets.UTF_16LE);
 		debug("Using password: ", this.password);
 	}
 
@@ -322,7 +319,7 @@ public class AESCrypt {
 			debug("IV2: ", ivSpec2.getIV());
 			debug("AES2: ", aesKey2.getEncoded());
 
-			out.write("AES".getBytes("UTF-8"));	// Heading.
+			out.write("AES".getBytes(StandardCharsets.UTF_8));	// Heading.
 			out.write(version);	// Version.
 			out.write(0);	// Reserved.
 			if (version == 2) {	// No extensions.
@@ -430,7 +427,7 @@ public class AESCrypt {
 
 			text = new byte[3];
 			readBytes(in, text);	// Heading.
-			if (!new String(text, "UTF-8").equals("AES")) {
+			if (!new String(text, StandardCharsets.UTF_8).equals("AES")) {
 				throw new IOException("Invalid file header");
 			}
 
