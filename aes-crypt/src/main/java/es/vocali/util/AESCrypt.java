@@ -53,6 +53,7 @@ import java.util.Enumeration;
  *       of bytes requested</li>
  *   <li>Allow encryption and decryption of streams where the total size is not known
  *       in advance</li>
+ *   <li>Verify that the reserved byte is 0</li>
  *   <li>Documentation tweaks and fixes</li>
  * </ul>
  *
@@ -423,7 +424,10 @@ public class AESCrypt {
 			}
 			debug("Version: " + version);
 
-			in.read();	// Reserved.
+			int reservedByte = in.read();	// Reserved.
+			if (reservedByte != 0) {
+				throw new IOException("Invalid reserved byte (expected 0, got " + reservedByte + ")");
+			}
 
 			if (version == 2) {	// Extensions.
 				text = new byte[2];
