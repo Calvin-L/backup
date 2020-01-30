@@ -2,14 +2,17 @@ language: java
 jdk:
   - oraclejdk12
   - openjdk12
+env:
+  - GRADLE_VERSION=5.3
+  - GRADLE_VERSION=6.1.1
 
-# Set up Gradle version 5.3.
+# Set up specific Gradle version.
 # Credit to @richiksc:
 # https://travis-ci.community/t/allow-custom-gradle-versions-to-be-specified-in-travis-yml/2751
 before_install:
-  - wget https://downloads.gradle-dn.com/distributions/gradle-5.3-bin.zip
-  - unzip -qq gradle-5.3-bin.zip
-  - export GRADLE_HOME=$PWD/gradle-5.3
+  - wget https://downloads.gradle-dn.com/distributions/gradle-${GRADLE_VERSION}-bin.zip
+  - unzip -qq gradle-${GRADLE_VERSION}-bin.zip
+  - export GRADLE_HOME=$PWD/gradle-${GRADLE_VERSION}
   - export PATH=$GRADLE_HOME/bin:$PATH
   - gradle -v
 
