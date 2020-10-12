@@ -267,7 +267,7 @@ public class Main {
 
     if (list) {
       backupper.list(newPassword).forEach(info -> {
-        System.out.println('[' + info.system().toString() + "] " + info.path());
+        System.out.println('[' + info.system().toString() + "] " + info.latestRevision().type + ": " + info.path());
       });
     }
 
