@@ -101,7 +101,7 @@ public class BackerUpper {
       Instant lastModTime = (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE) ? latest.modTime : null;
       Instant localModTime = f.getModTime().truncatedTo(ChronoUnit.MILLIS);
       if (!Objects.equals(lastModTime, localModTime)) {
-        System.out.println(" --> " + f.getPath() + " [" + lastModTime + " --> " + localModTime + ']');
+        System.out.println(" --> " + f.getPath() + " [" + (lastModTime != null ? ("updated: " + lastModTime + " --> ") : "new: ") + localModTime + ']');
         long size = f.getSizeInBytes();
         bytesUploaded += size;
         totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
@@ -120,7 +120,12 @@ public class BackerUpper {
 
     for (Path p : index.knownPaths(whatSystemIsThis)) {
       if (!inThisBackup.contains(p)) {
-        toForget.add(p);
+        var latest = index.mostRecentRevision(whatSystemIsThis, p);
+        assert latest != null;
+        if (latest.type != BackupIndex.FileType.TOMBSTONE) {
+          System.out.println(" --> " + p + " [deleted]");
+          toForget.add(p);
+        }
       }
     }
 
@@ -164,7 +169,7 @@ public class BackerUpper {
     })) {
       BackupIndex.BackupMetadata backupId = null;
 
-      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size())) {
+      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size() + toForget.size())) {
         loadIndexIfMissing(currentPassword);
 
         Instant lastIndexSave = Instant.now();
@@ -210,7 +215,9 @@ public class BackerUpper {
         }
 
         for (Path p : toForget) {
+          ProgressDisplay.Task task = progress.startTask("Removing from backup " + p);
           index.appendTombstone(whatSystemIsThis, backupId, p);
+          progress.finishTask(task);
         }
       } finally {
         try {
