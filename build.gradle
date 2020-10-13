@@ -4,8 +4,8 @@ plugins {
     id "io.freefair.lombok" version "4.1.6"
 }
 
-sourceCompatibility = 10
-targetCompatibility = 10
+sourceCompatibility = 12
+targetCompatibility = 12
 version = "1.0"
 
 ////////////////////////// Application setup
