@@ -29,6 +29,7 @@ import cal.prim.Price;
 import cal.prim.storage.S3Directory;
 import cal.prim.concurrency.SQLiteStringRegister;
 import cal.prim.concurrency.StringRegister;
+import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.XZCompression;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
@@ -186,6 +187,7 @@ public class Main {
             new JsonIndexFormatV01(),
             new JsonIndexFormatV02());
     final BackerUpper backupper;
+    final UnreliableWallClock clock = UnreliableWallClock.SYSTEM_CLOCK;
 
     if (local) {
       var registerLocation = Paths.get("/tmp/backup/register.db");
@@ -202,7 +204,8 @@ public class Main {
       EventuallyConsistentBlobStore blobStore = new BlobStoreOnDirectory(new LocalDirectory(Paths.get("/tmp/backup/blobs")));
       backupper = new BackerUpper(
               indexStore, indexFormat,
-              blobStore, transform);
+              blobStore, transform,
+              clock);
     } else {
       var credentials = AWSTools.credentialsProvider();
 
@@ -235,7 +238,8 @@ public class Main {
 
       backupper = new BackerUpper(
               indexStore, indexFormat,
-              blobStore, transform);
+              blobStore, transform,
+              clock);
     }
 
     // ------------------------------------------------------------------------------

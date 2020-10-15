@@ -1,9 +1,10 @@
 package cal.prim;
 
 import cal.bkup.Util;
+import cal.prim.time.MonotonicRealTimeClock;
 
+import java.math.BigInteger;
 import java.time.Duration;
-import java.time.Instant;
 
 /**
  * A {@link Runnable} wrapper that restricts how often the wrapped instance
@@ -18,13 +19,15 @@ public class RateLimitedRunnable implements Runnable {
     DELAY_FIRST_RUN
   }
 
+  private final MonotonicRealTimeClock clock;
   private final Duration rateLimit;
-  private Instant lastRun;
+  private BigInteger lastRun;
   private final Runnable wrapped;
 
   public RateLimitedRunnable(Duration rateLimit, Mode mode, Runnable wrapped) {
+    this.clock = MonotonicRealTimeClock.SYSTEM_CLOCK;
     this.rateLimit = rateLimit;
-    this.lastRun = mode.equals(Mode.DELAY_FIRST_RUN) ? Instant.now() : null;
+    this.lastRun = mode.equals(Mode.DELAY_FIRST_RUN) ? clock.sample() : null;
     this.wrapped = wrapped;
   }
 
@@ -34,8 +37,8 @@ public class RateLimitedRunnable implements Runnable {
    */
   @Override
   public void run() {
-    Instant now = Instant.now();
-    if (lastRun == null || Util.ge(Duration.between(lastRun, now), rateLimit)) {
+    var now = clock.sample();
+    if (lastRun == null || Util.ge(clock.timeBetweenSamples(lastRun, now), rateLimit)) {
       lastRun = now; // do this first in case wrapped.run() throws an exception
       wrapped.run();
     }

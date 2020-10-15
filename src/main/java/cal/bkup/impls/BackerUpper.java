@@ -2,13 +2,11 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
-import cal.bkup.types.SystemId;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
+import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
-import cal.prim.storage.ConsistentBlob;
-import cal.prim.storage.EventuallyConsistentBlobStore;
 import cal.prim.NoValue;
 import cal.prim.Pair;
 import cal.prim.PreconditionFailed;
@@ -17,6 +15,10 @@ import cal.prim.fs.HardLink;
 import cal.prim.fs.Link;
 import cal.prim.fs.RegularFile;
 import cal.prim.fs.SymLink;
+import cal.prim.storage.ConsistentBlob;
+import cal.prim.storage.EventuallyConsistentBlobStore;
+import cal.prim.time.MonotonicRealTimeClock;
+import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.Encryption;
 import cal.prim.transforms.StatisticsCollectingInputStream;
@@ -57,17 +59,20 @@ public class BackerUpper {
   private final IndexFormat indexFormat;
   private final EventuallyConsistentBlobStore blobStore;
   private final BlobTransformer transformer;
+  private final UnreliableWallClock wallClock;
+  private final MonotonicRealTimeClock durationClock = MonotonicRealTimeClock.SYSTEM_CLOCK;
   private final Duration PERIODIC_INDEX_RATE = Duration.ofMinutes(15);
 
   // Cached data
   private BackupIndex index = null;
   private ConsistentBlob.Tag tagForLastIndexLoad = null;
 
-  public BackerUpper(ConsistentBlob indexStore, IndexFormat indexFormat, EventuallyConsistentBlobStore blobStore, BlobTransformer transformer) {
+  public BackerUpper(ConsistentBlob indexStore, IndexFormat indexFormat, EventuallyConsistentBlobStore blobStore, BlobTransformer transformer, UnreliableWallClock wallClock) {
     this.indexStore = indexStore;
     this.indexFormat = indexFormat;
     this.blobStore = blobStore;
     this.transformer = transformer;
+    this.wallClock = wallClock;
   }
 
   public interface BackupPlan {
@@ -172,8 +177,8 @@ public class BackerUpper {
       try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size() + toForget.size())) {
         loadIndexIfMissing(currentPassword);
 
-        Instant lastIndexSave = Instant.now();
-        backupId = index.startBackup(whatSystemIsThis, lastIndexSave);
+        var lastIndexSave = durationClock.sample();
+        backupId = index.startBackup(whatSystemIsThis, wallClock.now());
 
         for (var f : files) {
           if (!keepRunning.get()) {
@@ -184,8 +189,8 @@ public class BackerUpper {
           } catch (NoSuchFileException ignored2) {
             warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
           }
-          Instant now = Instant.now();
-          if (Util.ge(now, lastIndexSave.plus(PERIODIC_INDEX_RATE))) {
+          var now = durationClock.sample();
+          if (Util.ge(durationClock.timeBetweenSamples(lastIndexSave, now), PERIODIC_INDEX_RATE)) {
             saveIndex(currentPassword, newPasswordForIndex);
             currentPassword = newPasswordForIndex;
             lastIndexSave = now;
@@ -222,7 +227,7 @@ public class BackerUpper {
       } finally {
         try {
           if (backupId != null) {
-            index.finishBackup(whatSystemIsThis, backupId, Instant.now());
+            index.finishBackup(whatSystemIsThis, backupId, wallClock.now());
             saveIndex(currentPassword, newPasswordForIndex);
           }
         } finally {
@@ -295,7 +300,7 @@ public class BackerUpper {
   public void cleanup(boolean forReal, String password, Duration retentionTime) throws IOException {
     indexStore.cleanup(forReal);
     loadIndexIfMissing(password);
-    var cutoff = Instant.now().minus(retentionTime);
+    var cutoff = wallClock.now().minus(retentionTime);
 
     for (SystemId system : index.knownSystems()) {
       for (Path path : Util.sorted(index.knownPaths(system))) {

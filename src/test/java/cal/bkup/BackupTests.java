@@ -16,6 +16,7 @@ import cal.prim.storage.ConsistentBlob;
 import cal.prim.storage.ConsistentBlobOnEventuallyConsistentDirectory;
 import cal.prim.storage.EventuallyConsistentDirectory;
 import cal.prim.storage.InMemoryDir;
+import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.XZCompression;
@@ -75,7 +76,8 @@ public class BackupTests {
             indexStore,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
 
     RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
       @Override
@@ -113,7 +115,8 @@ public class BackupTests {
             indexStore,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
 
     Sha256AndSize summary;
     try (InputStream in = f.open()) {
@@ -154,7 +157,8 @@ public class BackupTests {
             indexStore,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
     backup.list(newPassword).forEach(info -> {
       System.out.println("latest revision for " + info.path() + ": " + info.latestRevision().type);
     });
@@ -175,7 +179,8 @@ public class BackupTests {
             indexStore,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
 
     Object inode1 = new Object();
     RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, inode1) {
@@ -284,12 +289,14 @@ public class BackupTests {
             indexStoreA,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
     BackerUpper backupB = new BackerUpper(
             indexStoreB,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
 
     RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
       @Override
@@ -348,7 +355,8 @@ public class BackupTests {
             indexStoreB,
             new JsonIndexFormatV01(),
             new BlobStoreOnDirectory(blobDir),
-            transform);
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
 
     System.out.println("Backed up stuff:");
     backupC.list(password).forEach(thing -> System.out.println(" - " + thing.path() + " on " + thing.system()));
