@@ -38,12 +38,14 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
 
   @Override
   public Stream<String> list() {
-    // TODO: concurrent calls to createOrReplace() may change the list during iteration!
-    List<String> legalEntries = pendingWrites.stream()
-            .map(Pair::getFst)
-            .distinct()
-            .filter(name -> random.nextBoolean())
-            .collect(Collectors.toList());
+    List<String> legalEntries;
+    synchronized (this) {
+      legalEntries = pendingWrites.stream()
+              .map(Pair::getFst)
+              .distinct()
+              .filter(name -> random.nextBoolean())
+              .collect(Collectors.toList());
+    }
     Collections.shuffle(legalEntries, random);
     return legalEntries.stream();
   }
@@ -52,16 +54,20 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
   public void createOrReplace(String name, InputStream s) throws IOException {
     byte[] bytes = Util.read(s);
     System.out.println("set dir[" + name + "] (size=" + bytes.length + ')');
-    pendingWrites.add(new Pair<>(name, bytes));
+    synchronized (this) {
+      pendingWrites.add(new Pair<>(name, bytes));
+    }
   }
 
   @Override
   public InputStream open(String name) throws NoSuchFileException {
-    // TODO: concurrent calls to createOrReplace() or delete() may invalidate the stream!
-    List<byte[]> legalEntries = pendingWrites.stream()
-            .filter(entry -> entry.getFst().equals(name))
-            .map(Pair::getSnd)
-            .collect(Collectors.toList());
+    List<byte[]> legalEntries;
+    synchronized (this) {
+      legalEntries = pendingWrites.stream()
+              .filter(entry -> entry.getFst().equals(name))
+              .map(Pair::getSnd)
+              .collect(Collectors.toList());
+    }
     int index = random.nextInt(legalEntries.size() + 1);
     if (index >= legalEntries.size()) {
       throw new NoSuchFileException(name);
