@@ -13,6 +13,10 @@ public class Price {
     return new Price(getValueInCents().add(p2.getValueInCents()));
   }
 
+  public Price negate() {
+    return new Price(getValueInCents().negate());
+  }
+
   @Override
   public String toString() {
     long pennies = valueInCents.longValue();

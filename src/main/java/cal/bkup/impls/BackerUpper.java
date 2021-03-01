@@ -22,6 +22,8 @@ import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.Encryption;
 import cal.prim.transforms.StatisticsCollectingInputStream;
+import com.google.common.annotations.VisibleForTesting;
+import lombok.Value;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,13 +34,16 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -162,6 +167,7 @@ public class BackerUpper {
 
   }
 
+  @VisibleForTesting
   public void backup(SystemId whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
 
     List<String> warnings = new ArrayList<>();
@@ -191,7 +197,7 @@ public class BackerUpper {
           }
           var now = durationClock.sample();
           if (Util.ge(durationClock.timeBetweenSamples(lastIndexSave, now), PERIODIC_INDEX_RATE)) {
-            saveIndex(currentPassword, newPasswordForIndex);
+            saveIndex(currentPassword, newPasswordForIndex, ConflictBehavior.TRY_MERGE);
             currentPassword = newPasswordForIndex;
             lastIndexSave = now;
           }
@@ -228,7 +234,7 @@ public class BackerUpper {
         try {
           if (backupId != null) {
             index.finishBackup(whatSystemIsThis, backupId, wallClock.now());
-            saveIndex(currentPassword, newPasswordForIndex);
+            saveIndex(currentPassword, newPasswordForIndex, ConflictBehavior.TRY_MERGE);
           }
         } finally {
           if (warnings.size() > 0) {
@@ -284,105 +290,192 @@ public class BackerUpper {
     return transformer.followedBy(new Encryption(report.getKey())).unApply(blobStore.open(report.getIdAtTarget()));
   }
 
-  /**
-   * Clean up old state.  This method calls <code>{@link ConsistentBlob#cleanup(boolean) cleanup}(forReal)</code>
-   * on the index store.  It also deletes snapshots of backed-up files that are older than the given
-   * <code>retentionTime</code>.
-   *
-   * @param forReal true to actually clean up, or false for a "dry run" that only prints what would be done
-   * @param password the password to decrypt/encrypt the index
-   * @param retentionTime how far back to keep snapshots of files
-   * @throws IOException if an error occurs during cleanup.  This is an "ambiguous" outcome: the cleanup might
-   *   only partially happen.  Some of the cleanup that was incomplete might happen in the future.  This
-   *   exception can be thrown even if <code>forReal == false</code>, indicating that something went wrong
-   *   while determining what can be cleaned up.
-   */
-  public void cleanup(boolean forReal, String password, Duration retentionTime) throws IOException {
-    indexStore.cleanup(forReal);
-    loadIndexIfMissing(password);
+  public interface CleanupPlan {
+    long blobsReclaimed();
+    long bytesReclaimed();
+    Price estimatedExecutionCost();
+    Price estimatedMonthlyCost();
+    void execute() throws IOException, BackupIndex.MergeConflict;
+  }
+
+  private static boolean isSafeToForget(BackupIndex index, SystemId system, Path path, BackupIndex.Revision revision, long earliestBackupToKeep) {
+    return revision.backupNumber < earliestBackupToKeep
+            && index.getInfo(system, path).stream().anyMatch(r -> revision.backupNumber < r.backupNumber && r.backupNumber <= earliestBackupToKeep)
+            && index.findHardLinksPointingTo(system, path, revision.backupNumber).stream().allMatch(hardlink -> isSafeToForget(index, system, path, hardlink, earliestBackupToKeep));
+  }
+
+  @Value
+  private static class BackupID {
+    SystemId system;
+    BackupIndex.BackupMetadata info;
+  }
+
+  @Value
+  private static class RevisionID {
+    SystemId system;
+    Path path;
+    BackupIndex.Revision revision;
+  }
+
+  public CleanupPlan planCleanup(String password, Duration retentionTime, StorageCostModel blobStorageCosts) throws IOException {
     var cutoff = wallClock.now().minus(retentionTime);
 
+    loadIndexIfMissing(password);
+
+    // NOTE: There are several kinds of blobs in `blobsExistingAtStart`:
+    //  (1) "Orphaned" blobs that were created by failed backups.  These
+    //      are safe to delete.
+    //  (2) "In-use" blobs that were referenced by the index.  These are
+    //      safe to delete if they are no longer referenced by the index.
+    //  (3) "Usage-pending" blobs that may or may not have been referenced
+    //      by the index, and are referenced by in-progress backups unknown
+    //      to this cleanup process.  These are safe to delete since we
+    //      bumped the cleanup generation and saved the index successfully:
+    //      pending backups cannot complete successfully.
+    Set<String> blobsExistingAtStart = blobStore.list().collect(Collectors.toSet());
+
+    Set<SystemId> systemsToForget = new LinkedHashSet<>();
+    Set<BackupID> backupsToForget = new LinkedHashSet<>();
+    Set<RevisionID> revisionsToForget = new LinkedHashSet<>();
+    Set<Sha256AndSize> blobsToForget = new LinkedHashSet<>();
+    Set<String> blobsToDelete = new LinkedHashSet<>();
+
     for (SystemId system : index.knownSystems()) {
-      for (Path path : Util.sorted(index.knownPaths(system))) {
-        var revisions = index.getInfo(system, path);
-        int numToForget = 0;
-        for (int i = 0; i < revisions.size(); ++i) {
-          if (!canCleanup(revisions, i, cutoff)) {
-            break;
+      var backups = index.knownBackups(system);
+      if (backups.size() > 0) {
+        long earliestBackupToKeep = backups.stream().max(Comparator.comparingLong(BackupIndex.BackupMetadata::getBackupNumber)).get().getBackupNumber();
+        for (BackupIndex.BackupMetadata backupInfo : backups) {
+          if (backupInfo.getStartTime().compareTo(cutoff) >= 0) {
+            earliestBackupToKeep = Math.min(earliestBackupToKeep, backupInfo.getBackupNumber());
           }
-          var revision = revisions.get(i);
-          System.out.print("cleaning up " + path);
-          switch (revision.type) {
-            case REGULAR_FILE:
-              System.out.println(" (regular file, last modified " + revision.modTime + ')');
-              var nextRevision = revisions.get(i+1);
-              if (nextRevision.type.equals(BackupIndex.FileType.REGULAR_FILE)) {
-                System.out.println("  --> shasum " +
-                        Util.sha256toString(revision.summary.getSha256()) + " --> " +
-                        Util.sha256toString(nextRevision.summary.getSha256()));
-              } else {
-                System.out.println("  --> next revision " + nextRevision);
-              }
-              break;
-            case HARD_LINK:
-              System.out.println(" (hard link to " + revision.linkTarget + ')');
-              break;
-            case SOFT_LINK:
-              System.out.println(" (soft link to " + revision.linkTarget + ')');
-              break;
-            case TOMBSTONE:
-              System.out.println(" (tombstone marker)");
-              break;
-            default:
-              System.out.println();
-              break;
-          }
-          ++numToForget;
         }
 
-        // TODO: this is wrong!
-        // (1) We might delete the last reference to a file when there is a hard link
-        //     to its contents...?
-        // (2) We can't safely delete any blobs concurrently!
+        for (Path path : Util.sorted(index.knownPaths(system))) {
+          for (BackupIndex.Revision revision : index.getInfo(system, path)) {
+            if (isSafeToForget(index, system, path, revision, earliestBackupToKeep)) {
+              revisionsToForget.add(new RevisionID(system, path, revision));
+            }
+          }
+          for (BackupIndex.Revision revision : index.getInfo(system, path)) {
+            var r = new RevisionID(system, path, revision);
+            if (revisionsToForget.contains(r)) {
+              continue;
+            } else if (revision.type == BackupIndex.FileType.TOMBSTONE) {
+              revisionsToForget.add(new RevisionID(system, path, revision));
+            } else {
+              break;
+            }
+          }
+        }
+      }
 
-//        if (forReal) {
-//          for (int i = 0; i < numToForget; ++i) {
-//            index.forgetOldestRevision(system, path);
-//          }
-//        }
+      for (BackupIndex.BackupMetadata info : backups) {
+        if (index.knownPaths(system).stream()
+                .allMatch(p -> index.getInfo(system, p).stream()
+                        .filter(r -> r.backupNumber == info.getBackupNumber())
+                        .allMatch(r -> revisionsToForget.contains(new RevisionID(system, p, r))))) {
+          backupsToForget.add(new BackupID(system, info));
+        }
+      }
 
+      if (index.knownBackups(system).stream()
+              .allMatch(bkup -> backupsToForget.contains(new BackupID(system, bkup)))) {
+        systemsToForget.add(system);
       }
     }
 
-    // TODO: prune old data from BackupIndex
-    // TODO: when can we delete things in the blob store?
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * Assuming that revisions 0 to <code>i-1</code> (inclusive) are
-   * going to be cleaned up, can revision <code>i</code> be cleaned
-   * up?
-   *
-   * @param revisions a list of revisions to consider
-   * @param i the index of the revision to check
-   * @param cutoff the "cutoff" time: revisions newer than this must be kept
-   * @return whether <code>revisions[i]</code> can be cleaned up
-   */
-  private boolean canCleanup(List<BackupIndex.Revision> revisions, int i, Instant cutoff) {
-    var revision = revisions.get(i);
-    boolean hasNextRevision = i < (revisions.size() - 1);
-    switch (revision.type) {
-      case REGULAR_FILE:
-        return revision.modTime.isBefore(cutoff) && hasNextRevision;
-      case HARD_LINK:
-      case SOFT_LINK:
-        return hasNextRevision;
-      case TOMBSTONE:
-        return true;
-      default:
-        throw new IllegalArgumentException("unknown type for revision " + revision);
+    // "Mark" -- find all referenced blobs
+    Set<Sha256AndSize> referencedBlobs = new HashSet<>();
+    for (SystemId system : index.knownSystems()) {
+      for (Path path : Util.sorted(index.knownPaths(system))) {
+        for (BackupIndex.Revision revision : index.getInfo(system, path)) {
+          if (revision.summary != null && !revisionsToForget.contains(new RevisionID(system, path, revision))) {
+            referencedBlobs.add(revision.summary);
+          }
+        }
+      }
     }
+
+    index.listBlobs()
+            .filter(b -> !referencedBlobs.contains(b))
+            .forEach(blobsToForget::add);
+
+    Set<String> blobsExistingAtEnd = referencedBlobs.stream()
+            .map(index::lookupBlob)
+            .map(Objects::requireNonNull)
+            .map(BackupReport::getIdAtTarget)
+            .collect(Collectors.toSet());
+
+    // "Sweep" -- anything that isn't referenced can be deleted
+    blobsToDelete.clear();
+    blobsToDelete.addAll(blobsExistingAtStart);
+    blobsToDelete.removeAll(blobsExistingAtEnd);
+
+    return new CleanupPlan() {
+      @Override
+      public long blobsReclaimed() {
+        return blobsToDelete.size();
+      }
+
+      @Override
+      public long bytesReclaimed() {
+        return blobsToDelete.stream()
+                .map(id -> index.lookupBlobByIdAtTarget(id))
+                .filter(Objects::nonNull)
+                .mapToLong(BackupReport::getSizeAtTarget)
+                .sum();
+      }
+
+      @Override
+      public Price estimatedExecutionCost() {
+        return blobsToDelete.stream()
+                .map(id -> index.lookupBlobByIdAtTarget(id))
+                .filter(Objects::nonNull)
+                .map(report -> blobStorageCosts.costToDeleteBlob(report.getSizeAtTarget(), Duration.ZERO))
+                .reduce(Price.ZERO, Price::plus);
+      }
+
+      @Override
+      public Price estimatedMonthlyCost() {
+        return blobsToDelete.stream()
+                .map(id -> index.lookupBlobByIdAtTarget(id))
+                .filter(Objects::nonNull)
+                .mapToLong(BackupReport::getSizeAtTarget)
+                .mapToObj(blobStorageCosts::monthlyStorageCostForBlob)
+                .reduce(Price.ZERO, Price::plus)
+                .negate();
+      }
+
+      @Override
+      public void execute() throws IOException, BackupIndex.MergeConflict {
+        System.out.println("Cleaning up index");
+        for (RevisionID rev : revisionsToForget) {
+          index.forgetRevision(rev.system, rev.path, rev.revision);
+        }
+        for (BackupID backup : backupsToForget) {
+          index.forgetBackup(backup.system, backup.info);
+        }
+        for (SystemId system : systemsToForget) {
+          index.forgetSystem(system);
+        }
+        for (Sha256AndSize blob : blobsToForget) {
+          index.forgetBlob(blob);
+        }
+
+        System.out.println("Bumping cleanup generation and saving index");
+        index.bumpCleanupGeneration();
+        saveIndex(password, password, ConflictBehavior.ALWAYS_FAIL);
+
+        System.out.println("Cleaning up the index store");
+        indexStore.cleanup(true);
+
+        System.out.println("Deleting " + blobsToDelete.size() + " blobs");
+        for (String blobName : blobsToDelete) {
+          System.out.println(" --> " + blobName);
+          blobStore.delete(blobName);
+        }
+      }
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -487,6 +580,17 @@ public class BackerUpper {
     return transformer.followedBy(new Encryption(password)).unApply(indexStore.read(indexStore.head()));
   }
 
+  @VisibleForTesting
+  public BackupIndex getIndex(String password) throws IOException {
+    loadIndexIfMissing(password);
+    return index;
+  }
+
+  private enum ConflictBehavior {
+    TRY_MERGE,
+    ALWAYS_FAIL,
+  }
+
   /**
    * Commit the contents of {@link #index} to {@link #indexStore}.
    * If another process has modified the index stored in {@link #indexStore},
@@ -495,11 +599,13 @@ public class BackerUpper {
    *
    * @param currentPassword the old password, used if the index needs to be downloaded
    * @param newPassword the password to encrypt the index
+   * @param onConflict what to do if another process has modified the index since it was last read
    * @throws IOException
    * @throws cal.bkup.impls.BackupIndex.MergeConflict if another process modified the index, but the changes
-   *         cannot be merged with the changes made by this process
+   *         cannot be merged with the changes made by this process.  If this happens, the current {@link #index}
+   *         and {@link #tagForLastIndexLoad} are replaced by the current values.
    */
-  private void saveIndex(String currentPassword, String newPassword) throws IOException, BackupIndex.MergeConflict {
+  private void saveIndex(String currentPassword, String newPassword, ConflictBehavior onConflict) throws IOException, BackupIndex.MergeConflict {
     System.out.println("Saving index...");
     for (;;) {
       PreconditionFailed failure;
@@ -510,13 +616,26 @@ public class BackerUpper {
         failure = exn;
       }
 
-      System.out.println("Checkpoint failed due to " + failure);
-      System.out.println("This probably happened because another process modified the");
-      System.out.println("checkpoint while this process was running.  This process will");
-      System.out.println("reload the checkpoint, merge its progress, and try again...");
-      var latest = readLatestFromIndexStore(currentPassword);
-      index = index.merge(latest.getSnd());
-      tagForLastIndexLoad = latest.getFst();
+      if (onConflict == ConflictBehavior.TRY_MERGE) {
+        System.out.println("Checkpoint failed due to " + failure);
+        System.out.println("This probably happened because another process modified the");
+        System.out.println("checkpoint while this process was running.  This process will");
+        System.out.println("reload the checkpoint, merge its progress, and try again...");
+        var latest = readLatestFromIndexStore(currentPassword);
+        tagForLastIndexLoad = latest.getFst();
+        try {
+          index = index.merge(latest.getSnd());
+        } catch (BackupIndex.MergeConflict exn) {
+          // merge failed; invalidate cached data
+          index = latest.getSnd();
+          throw exn;
+        }
+      } else {
+        // invalidate cached data
+        tagForLastIndexLoad = null;
+        index = null;
+        throw new BackupIndex.MergeConflict("The index could not be saved due to concurrent modification");
+      }
     }
   }
 

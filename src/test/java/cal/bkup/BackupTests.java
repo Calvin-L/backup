@@ -2,7 +2,7 @@ package cal.bkup;
 
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
-import cal.bkup.impls.JsonIndexFormatV01;
+import cal.bkup.impls.JsonIndexFormatV03;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
@@ -54,12 +54,17 @@ public class BackupTests {
     }
 
     @Override
+    public Price costToDeleteBlob(long numBytes, Duration timeSinceUpload) {
+      return Price.ZERO;
+    }
+
+    @Override
     public Price monthlyStorageCostForBlob(long numBytes) {
       return Price.ZERO;
     }
   };
 
-  private static final IndexFormat FORMAT = new JsonIndexFormatV01();
+  private static final IndexFormat FORMAT = new JsonIndexFormatV03();
 
   private void ensureWf(ConsistentBlob indexStore, ConsistentInMemoryDir blobDir, BlobTransformer transform, String password) throws IOException {
     BackupIndex index = new BackerUpper(indexStore, FORMAT, new BlobStoreOnDirectory(blobDir), transform, new TestClock()).getIndex(password);
@@ -105,7 +110,7 @@ public class BackupTests {
     BlobTransformer transform = new XZCompression();
     BackerUpper backup = new BackerUpper(
             indexStore,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
@@ -144,7 +149,7 @@ public class BackupTests {
     // restore of index should work
     BackerUpper other = new BackerUpper(
             indexStore,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
@@ -186,7 +191,7 @@ public class BackupTests {
     // assert loadable
     backup = new BackerUpper(
             indexStore,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
@@ -208,7 +213,7 @@ public class BackupTests {
     BlobTransformer transform = new XZCompression();
     BackerUpper backup = new BackerUpper(
             indexStore,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
@@ -318,13 +323,13 @@ public class BackupTests {
     BlobTransformer transform = new XZCompression();
     BackerUpper backupA = new BackerUpper(
             indexStoreA,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
     BackerUpper backupB = new BackerUpper(
             indexStoreB,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
@@ -384,7 +389,7 @@ public class BackupTests {
 
     BackerUpper backupC = new BackerUpper(
             indexStoreB,
-            new JsonIndexFormatV01(),
+            FORMAT,
             new BlobStoreOnDirectory(blobDir),
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
@@ -395,6 +400,304 @@ public class BackupTests {
     Assert.assertEquals(backupC.list(password).count(), 2L);
     ensureWf(indexStoreB, blobDir.settle(), transform, password);
 
+  }
+
+  private static class TestFile extends RegularFile {
+    private final byte[] contents;
+
+    public TestFile(@NonNull Path path, @NonNull Instant modTime, Object iNode, byte[] contents) {
+      super(path, modTime, contents.length, iNode);
+      this.contents = contents;
+    }
+
+    @Override
+    public InputStream open() {
+      return new ByteArrayInputStream(contents);
+    }
+  }
+
+  private static class TestClock implements UnreliableWallClock {
+    Instant now = Instant.EPOCH;
+
+    @Override
+    public synchronized Instant now() {
+      return now;
+    }
+
+    public synchronized void timePasses(Duration time) {
+      assert !time.isNegative();
+      now = now.plus(time);
+    }
+  }
+
+  @Test
+  public void testCleanup() throws IOException, BackupIndex.MergeConflict {
+
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final var indexDir = new ConsistentInMemoryDir();
+    final var blobDir = new ConsistentInMemoryDir();
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), indexDir);
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    Instant fCreation = clock.now();
+    var f = new TestFile(Paths.get("tmp", "a"), fCreation, 1, "contents".getBytes(StandardCharsets.UTF_8));
+
+    backup.backup(system, password, password,
+            Collections.singletonList(f),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    var index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.REGULAR_FILE);
+
+    // 10 days later, clean up everything older than 5 days
+    clock.timePasses(Duration.ofDays(10));
+    backup.planCleanup(password, Duration.ofDays(5), FREE).execute();
+
+    // file should still be there
+    index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.REGULAR_FILE);
+    Assert.assertEquals(blobDir.list().count(), 1);
+
+    backup.backup(system, password, password,
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.singletonList(f.getPath()));
+
+    // file should be tombstoned
+    index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.TOMBSTONE);
+    Assert.assertEquals(blobDir.list().count(), 1);
+
+    // 5 days later, clean up everything older than 15 days
+    clock.timePasses(Duration.ofDays(5));
+    backup.planCleanup(password, Duration.ofDays(15), FREE).execute();
+
+    // file should still be there
+    index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.TOMBSTONE);
+    Assert.assertEquals(blobDir.list().count(), 1);
+
+    // clean up everything older than 10 days
+    backup.planCleanup(password, Duration.ofDays(10), FREE).execute();
+
+    // file should be gone
+    index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 0);
+
+    System.out.println("index dir = " + indexDir);
+    System.out.println("blob dir = " + blobDir);
+
+    // cleanup should retain the newest index, and may retain others
+    Assert.assertTrue(indexDir.list().count() >= 1);
+
+    // cleanup should drop unused blobs
+    Assert.assertEquals(blobDir.list().count(), 0);
+    ensureWf(indexStore, blobDir, transform, password);
+
+  }
+
+  @Test
+  public void testCleanupRetainsHardLinkTargets() throws IOException, BackupIndex.MergeConflict {
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final var indexDir = new ConsistentInMemoryDir();
+    final var blobDir = new ConsistentInMemoryDir();
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), indexDir);
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    Instant fCreation = clock.now();
+    var file = new TestFile(Paths.get("tmp", "a"), fCreation, 1, "contents".getBytes(StandardCharsets.UTF_8));
+    var link = new HardLink(Paths.get("home", "user", "file"), file.getPath());
+
+    backup.backup(system, password, password,
+            Collections.singletonList(file),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    clock.timePasses(Duration.ofDays(10));
+
+    backup.backup(system, password, password,
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.singletonList(link),
+            Collections.emptyList());
+
+    backup.planCleanup(password, Duration.ofDays(5), FREE).execute();
+
+    // The file should not be deleted!
+    Assert.assertEquals(blobDir.list().count(), 1);
+    ensureWf(indexStore, blobDir, transform, password);
+  }
+
+  @Test
+  public void testCleanupFencesOutBackups() throws IOException, BackupIndex.MergeConflict {
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final var indexDir = new ConsistentInMemoryDir();
+    final var blobDir = new ConsistentInMemoryDir();
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), indexDir);
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    var contents = "contents".getBytes(StandardCharsets.UTF_8);
+    var fileA = new TestFile(Paths.get("tmp", "a"), clock.now(), 1, contents);
+    var fileB = new TestFile(Paths.get("tmp", "b"), clock.now(), 2, contents);
+
+    backup.backup(system, password, password,
+            Collections.singletonList(fileA),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    backup.backup(system, password, password,
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.singletonList(fileA.getPath()));
+
+    clock.timePasses(Duration.ofDays(10));
+
+    // file is now eligible for cleanup
+    // in parallel: try do do a backup that resurrects its blob, and a cleanup that removes it (the cleanup wins)
+
+    BackerUpper cleanup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+    cleanup.planCleanup(password, Duration.ofDays(5), FREE).execute();
+    Assert.assertEquals(blobDir.list().count(), 0);
+
+    BigInteger gen = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock).getIndex(password).getCleanupGeneration();
+    Assert.assertNotEquals(gen, backup.getIndex(password).getCleanupGeneration());
+
+    boolean failedDueToMergeConflict = false;
+    try {
+      backup.backup(system, password, password,
+              Collections.singletonList(fileB),
+              Collections.emptyList(),
+              Collections.emptyList(),
+              Collections.emptyList());
+    } catch (BackupIndex.MergeConflict ignored) {
+      failedDueToMergeConflict = true;
+    }
+
+    Assert.assertTrue(failedDueToMergeConflict);
+    Assert.assertEquals(blobDir.list().count(), 0);
+
+    // 2nd try should succeed, and re-upload the blob
+    backup.backup(system, password, password,
+            Collections.singletonList(fileB),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    Assert.assertEquals(blobDir.list().count(), 1);
+    ensureWf(indexStore, blobDir, transform, password);
+  }
+
+  @Test
+  public void testCleanupFencesOutConcurrentCleanups() throws IOException, BackupIndex.MergeConflict {
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final var indexDir = new ConsistentInMemoryDir();
+    final var blobDir = new ConsistentInMemoryDir();
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), indexDir);
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    var contents = "contents".getBytes(StandardCharsets.UTF_8);
+    var fileA = new TestFile(Paths.get("tmp", "a"), clock.now(), 1, contents);
+    var fileB = new TestFile(Paths.get("tmp", "b"), clock.now(), 2, contents);
+
+    backup.backup(system, password, password,
+            Collections.singletonList(fileA),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    backup.backup(system, password, password,
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.singletonList(fileA.getPath()));
+
+    clock.timePasses(Duration.ofDays(10));
+
+    // file is now eligible for cleanup
+    // in parallel: try do do
+    //   - a backup that resurrects its blob followed by a cleanup, and
+    //   - a cleanup that removes it
+    // assuming the backup+cleanup "wins" the race.
+    // The followup cleanup should not succeed.
+
+    BackerUpper cleanup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+    var cleanupThatShouldFail = cleanup.planCleanup(password, Duration.ofDays(5), FREE);
+
+    backup.backup(system, password, password,
+            Collections.singletonList(fileB),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+    backup.planCleanup(password, Duration.ofDays(5), FREE).execute();
+
+    Assert.assertThrows(BackupIndex.MergeConflict.class, cleanupThatShouldFail::execute);
+    Assert.assertEquals(blobDir.list().count(), 1);
+    ensureWf(indexStore, blobDir, transform, password);
   }
 
 }

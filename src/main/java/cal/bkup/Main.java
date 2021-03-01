@@ -4,31 +4,32 @@ import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormatV01;
 import cal.bkup.impls.JsonIndexFormatV02;
+import cal.bkup.impls.JsonIndexFormatV03;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.VersionedIndexFormat;
 import cal.bkup.types.Config;
-import cal.bkup.types.SystemId;
-import cal.prim.NoValue;
-import cal.prim.fs.HardLink;
 import cal.bkup.types.IndexFormat;
-import cal.prim.fs.RegularFile;
 import cal.bkup.types.Rule;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
+import cal.bkup.types.SystemId;
+import cal.prim.NoValue;
+import cal.prim.Pair;
+import cal.prim.Price;
+import cal.prim.concurrency.DynamoDBStringRegister;
+import cal.prim.concurrency.SQLiteStringRegister;
+import cal.prim.concurrency.StringRegister;
+import cal.prim.fs.HardLink;
+import cal.prim.fs.RegularFile;
 import cal.prim.fs.SymLink;
 import cal.prim.storage.BlobStoreOnDirectory;
 import cal.prim.storage.ConsistentBlob;
 import cal.prim.storage.ConsistentBlobOnEventuallyConsistentDirectory;
-import cal.prim.concurrency.DynamoDBStringRegister;
 import cal.prim.storage.EventuallyConsistentBlobStore;
 import cal.prim.storage.EventuallyConsistentDirectory;
 import cal.prim.storage.GlacierBlobStore;
 import cal.prim.storage.LocalDirectory;
-import cal.prim.Pair;
-import cal.prim.Price;
 import cal.prim.storage.S3Directory;
-import cal.prim.concurrency.SQLiteStringRegister;
-import cal.prim.concurrency.StringRegister;
 import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.XZCompression;
@@ -99,6 +100,19 @@ public class Main {
       return numBytes <= AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK ?
               new Price(PENNIES_PER_UPLOAD_REQ) :
               new Price(PENNIES_PER_UPLOAD_REQ.multiply(new BigFraction(numBytes / AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK).add(BigFraction.TWO)));
+    }
+
+    @Override
+    public Price costToDeleteBlob(long numBytes, Duration timeSinceUpload) {
+      // Delete requests are free, but "archives deleted before 90 days incur a pro-rated charge equal to the storage
+      // charge for the remaining days".  https://aws.amazon.com/glacier/pricing/
+      Duration remaining = MINIMUM_STORAGE_DURATION.minus(timeSinceUpload);
+      if (remaining.isNegative()) {
+        return Price.ZERO;
+      }
+      long seconds = remaining.toSeconds();
+      long secondsPerMonth = 2592000;
+      return new Price(EARLY_DELETION_FEE_PER_GB_MONTH.divide(secondsPerMonth).multiply(seconds));
     }
 
     @Override
@@ -185,7 +199,8 @@ public class Main {
     final BlobTransformer transform = new XZCompression();
     final IndexFormat indexFormat = new VersionedIndexFormat(
             new JsonIndexFormatV01(),
-            new JsonIndexFormatV02());
+            new JsonIndexFormatV02(),
+            new JsonIndexFormatV03());
     final BackerUpper backupper;
     final UnreliableWallClock clock = UnreliableWallClock.SYSTEM_CLOCK;
 
@@ -276,7 +291,21 @@ public class Main {
     }
 
     if (gc) {
-      backupper.cleanup(!dryRun, newPassword, Duration.ofDays(60));
+      System.out.println("Planning cleanup...");
+      BackerUpper.CleanupPlan plan = backupper.planCleanup(password, Duration.ofDays(60), COST_MODEL);
+      System.out.println("Estimated costs:");
+      System.out.println("  deleted blobs:       " + plan.blobsReclaimed());
+      System.out.println("  reclaimed bytes:     " + Util.formatSize(plan.bytesReclaimed()));
+      System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
+      System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
+      if (!dryRun && confirm("Proceed?")) {
+        try {
+          plan.execute();
+        } catch (BackupIndex.MergeConflict mergeConflict) {
+          System.err.println("Cleanup was skipped due to a concurrent backup.");
+          System.err.println("Wait for the other backup to finish, and run the cleanup again.");
+        }
+      }
     }
 
     if (dumpIndex) {

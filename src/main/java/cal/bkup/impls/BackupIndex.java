@@ -2,28 +2,35 @@ package cal.bkup.impls;
 
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.Sha256AndSize;
+import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SystemId;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.ToString;
 import lombok.Value;
 
 import javax.annotation.Nullable;
+import java.math.BigInteger;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -61,6 +68,7 @@ public class BackupIndex {
 
   @ToString
   @EqualsAndHashCode
+  @AllArgsConstructor(access=AccessLevel.PRIVATE)
   public static class Revision {
     public final long backupNumber;
     public final FileType type;
@@ -124,21 +132,36 @@ public class BackupIndex {
   private final Map<SystemId, Map<Path, List<Revision>>> files;
   private final Map<Sha256AndSize, BackupReport> blobs;
 
+  /**
+   * The garbage collection (GC) generation is used to fence out backups when
+   * cleanup happens.  Cleanups bump this number, preventing a {@link #merge(BackupIndex)}
+   * with concurrent backups.
+   *
+   * @see BackerUpper#planCleanup(String, Duration, StorageCostModel)
+   */
+  private BigInteger cleanupGeneration;
+
   public BackupIndex() {
-    this(new HashMap<>(), new HashMap<>(), new HashMap<>());
+    this(new HashMap<>(), new HashMap<>(), new HashMap<>(), BigInteger.ZERO);
   }
 
   private BackupIndex(
           Map<SystemId, List<BackupMetadata>> backupHistory,
           Map<SystemId, Map<Path, List<Revision>>> data,
-          Map<Sha256AndSize, BackupReport> blobs) {
+          Map<Sha256AndSize, BackupReport> blobs,
+          BigInteger cleanupGeneration) {
     this.backupHistory = backupHistory;
     this.files = data;
     this.blobs = blobs;
+    this.cleanupGeneration = cleanupGeneration;
   }
 
   public synchronized @Nullable BackupReport lookupBlob(Sha256AndSize content) {
     return blobs.get(content);
+  }
+
+  public synchronized @Nullable BackupReport lookupBlobByIdAtTarget(String idAtTarget) {
+    return blobs.values().stream().filter(info -> info.getIdAtTarget().equals(idAtTarget)).findAny().orElse(null);
   }
 
   public synchronized void forgetBlob(Sha256AndSize content) {
@@ -188,6 +211,28 @@ public class BackupIndex {
     return revisions != null ? new ArrayList<>(revisions) : Collections.emptyList();
   }
 
+  public synchronized Revision resolveHardLinkTarget(SystemId system, Revision hardLink) {
+    if (hardLink.type != FileType.HARD_LINK) {
+      throw new IllegalArgumentException();
+    }
+    return getInfo(system, hardLink.linkTarget).stream()
+            .filter(possibleTarget -> possibleTarget.backupNumber <= hardLink.backupNumber)
+            .max(Comparator.comparingLong(rr -> rr.backupNumber))
+            .get();
+  }
+
+  public synchronized List<Revision> findHardLinksPointingTo(SystemId system, Path path, long revisionNumber) {
+    List<Revision> result = new ArrayList<>();
+    for (Path p : knownPaths(system)) {
+      for (Revision r : getInfo(system, p)) {
+        if (r.type == FileType.HARD_LINK && r.linkTarget == path && resolveHardLinkTarget(system, r).backupNumber == revisionNumber) {
+          result.add(r);
+        }
+      }
+    }
+    return result;
+  }
+
   private <T> T lastEntry(List<T> list) {
     return list.get(list.size() - 1);
   }
@@ -200,8 +245,53 @@ public class BackupIndex {
     return lastEntry(revisions);
   }
 
+  public synchronized void forgetRevision(SystemId system, Path path, Revision revision) {
+    if (revision == mostRecentRevision(system, path) && revision.type != FileType.TOMBSTONE) {
+      throw new IllegalArgumentException("Can't forget most recent revision!");
+    }
+    Map<Path, List<Revision>> info = files.get(system);
+    if (info != null) {
+      List<Revision> revs = info.get(path);
+      if (revs != null) {
+        revs.remove(revision);
+        if (revs.isEmpty()) {
+          info.remove(path);
+        }
+      }
+      if (info.isEmpty()) {
+        files.remove(system);
+      }
+    }
+  }
+
   public synchronized void addBackupInfo(SystemId system, BackupMetadata info) {
     backupHistory.computeIfAbsent(system, s -> new ArrayList<>()).add(info);
+  }
+
+  public synchronized void forgetBackup(SystemId system, BackupMetadata info) {
+    for (Path p : knownPaths(system)) {
+      for (Revision r : getInfo(system, p)) {
+        if (r.backupNumber == info.backupNumber) {
+          throw new IllegalArgumentException("Can't forget backup while a revision exists");
+        }
+      }
+    }
+    Optional.ofNullable(backupHistory.get(system)).ifPresent(backups -> backups.remove(info));
+  }
+
+  public synchronized void forgetSystem(SystemId system) {
+    var backups = backupHistory.get(system);
+    if (backups != null && !backups.isEmpty()) {
+      throw new IllegalArgumentException("Can't forget system with known backups");
+    }
+
+    var paths = files.get(system);
+    if (paths != null && !paths.isEmpty()) {
+      throw new IllegalStateException("There are known paths for a system with no backups...?");
+    }
+
+    backupHistory.remove(system);
+    files.remove(system);
   }
 
   public synchronized BackupMetadata startBackup(SystemId system, Instant now) {
@@ -272,8 +362,17 @@ public class BackupIndex {
     findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber()));
   }
 
-  public synchronized void forgetOldestRevision(SystemId system, Path path) {
-    files.get(system).get(path).remove(0);
+  public synchronized void setCleanupGeneration(BigInteger newCleanupGeneration) {
+    assert newCleanupGeneration.compareTo(cleanupGeneration) >= 0;
+    cleanupGeneration = newCleanupGeneration;
+  }
+
+  public synchronized void bumpCleanupGeneration() {
+    setCleanupGeneration(cleanupGeneration.add(BigInteger.ONE));
+  }
+
+  public BigInteger getCleanupGeneration() {
+    return cleanupGeneration;
   }
 
   public static class MergeConflict extends Exception {
@@ -359,12 +458,14 @@ public class BackupIndex {
   private static final Merger<Map<SystemId, List<BackupMetadata>>> BACKUP_MERGER = new MergeMaps<>(new MergeLists<>(new MergeRequiringEquality<>()));
   private static final Merger<Map<SystemId, Map<Path, List<Revision>>>> FILE_MERGER = new MergeMaps<>(new MergeMaps<>(new MergeLists<>(new MergeRequiringEquality<>())));
   private static final Merger<Map<Sha256AndSize, BackupReport>> BLOB_MERGER = new MergeMaps<>(new MergeWithArbitraryChoice<>());
+  private static final Merger<BigInteger> CLEANUP_GENERATION_MERGER = new MergeRequiringEquality<>();
 
   public BackupIndex merge(BackupIndex other) throws MergeConflict {
     final Map<SystemId, List<BackupMetadata>> backups = BACKUP_MERGER.merge(this.backupHistory, other.backupHistory);
     final Map<SystemId, Map<Path, List<Revision>>> files = FILE_MERGER.merge(this.files, other.files);
     final Map<Sha256AndSize, BackupReport> blobs = BLOB_MERGER.merge(this.blobs, other.blobs);
-    return new BackupIndex(backups, files, blobs);
+    final var cleanupGeneration = CLEANUP_GENERATION_MERGER.merge(this.cleanupGeneration, other.cleanupGeneration);
+    return new BackupIndex(backups, files, blobs, cleanupGeneration);
   }
 
 }
