@@ -2,6 +2,7 @@ package cal.prim.storage;
 
 import cal.bkup.Util;
 import cal.prim.Pair;
+import com.google.common.collect.ImmutableList;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -83,8 +84,20 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
    *
    * @return the list of pending writes
    */
-  public List<Pair<String, byte[]>> getPendingWrites() {
-    return Collections.unmodifiableList(pendingWrites);
+  public synchronized List<Pair<String, byte[]>> getPendingWrites() {
+    return ImmutableList.copyOf(pendingWrites);
+  }
+
+  public ConsistentInMemoryDir settle() {
+    ConsistentInMemoryDir result = new ConsistentInMemoryDir();
+    for (var entry : pendingWrites) {
+      try {
+        result.createOrReplace(entry.getFst(), new ByteArrayInputStream(entry.getSnd()));
+      } catch (IOException e) {
+        throw new IllegalStateException();
+      }
+    }
+    return result;
   }
 
 }

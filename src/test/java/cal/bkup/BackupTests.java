@@ -3,6 +3,7 @@ package cal.bkup;
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
 import cal.bkup.impls.JsonIndexFormatV01;
+import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SystemId;
@@ -10,30 +11,37 @@ import cal.prim.NoValue;
 import cal.prim.Price;
 import cal.prim.concurrency.InMemoryStringRegister;
 import cal.prim.concurrency.StringRegister;
+import cal.prim.fs.HardLink;
 import cal.prim.fs.RegularFile;
 import cal.prim.storage.BlobStoreOnDirectory;
 import cal.prim.storage.ConsistentBlob;
 import cal.prim.storage.ConsistentBlobOnEventuallyConsistentDirectory;
+import cal.prim.storage.ConsistentInMemoryDir;
 import cal.prim.storage.EventuallyConsistentDirectory;
 import cal.prim.storage.InMemoryDir;
 import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.XZCompression;
+import lombok.NonNull;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Test
@@ -50,6 +58,29 @@ public class BackupTests {
       return Price.ZERO;
     }
   };
+
+  private static final IndexFormat FORMAT = new JsonIndexFormatV01();
+
+  private void ensureWf(ConsistentBlob indexStore, ConsistentInMemoryDir blobDir, BlobTransformer transform, String password) throws IOException {
+    BackupIndex index = new BackerUpper(indexStore, FORMAT, new BlobStoreOnDirectory(blobDir), transform, new TestClock()).getIndex(password);
+    for (var sys : index.knownSystems()) {
+      for (var p : index.knownPaths(sys)) {
+        for (var rev : index.getInfo(sys, p)) {
+          switch (rev.type) {
+            case REGULAR_FILE:
+              Assert.assertNotNull(blobDir.open(index.lookupBlob(rev.summary).getIdAtTarget()));
+              break;
+            case HARD_LINK:
+              Assert.assertNotNull(index.resolveHardLinkTarget(sys, rev));
+              break;
+            case SOFT_LINK:
+            case TOMBSTONE:
+              break;
+          }
+        }
+      }
+    }
+  }
 
   private InputStream readAny(EventuallyConsistentDirectory store) throws IOException {
     for (;;) {
@@ -362,6 +393,7 @@ public class BackupTests {
     backupC.list(password).forEach(thing -> System.out.println(" - " + thing.path() + " on " + thing.system()));
 
     Assert.assertEquals(backupC.list(password).count(), 2L);
+    ensureWf(indexStoreB, blobDir.settle(), transform, password);
 
   }
 
