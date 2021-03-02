@@ -294,7 +294,7 @@ public class Main {
       System.out.println("Planning cleanup...");
       BackerUpper.CleanupPlan plan = backupper.planCleanup(password, Duration.ofDays(60), COST_MODEL);
       System.out.println("Estimated costs:");
-      System.out.println("  deleted blobs:       " + plan.blobsReclaimed());
+      System.out.println("  deleted blobs:       " + plan.totalBlobsReclaimed() + " (" + plan.untrackedBlobsReclaimed() + " of which are not known to the index)");
       System.out.println("  reclaimed bytes:     " + Util.formatSize(plan.bytesReclaimed()));
       System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
       System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());

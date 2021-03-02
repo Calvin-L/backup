@@ -293,7 +293,8 @@ public class BackerUpper {
   }
 
   public interface CleanupPlan {
-    long blobsReclaimed();
+    long totalBlobsReclaimed();
+    long untrackedBlobsReclaimed();
     long bytesReclaimed();
     Price estimatedExecutionCost();
     Price estimatedMonthlyCost();
@@ -439,8 +440,13 @@ public class BackerUpper {
 
     return new CleanupPlan() {
       @Override
-      public long blobsReclaimed() {
+      public long totalBlobsReclaimed() {
         return blobsToDelete.size();
+      }
+
+      @Override
+      public long untrackedBlobsReclaimed() {
+        return (long)(blobsToDelete.size()) - blobsToForget.size();
       }
 
       @Override
