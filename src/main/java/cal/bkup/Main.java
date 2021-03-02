@@ -112,7 +112,7 @@ public class Main {
       }
       long seconds = remaining.toSeconds();
       long secondsPerMonth = 2592000;
-      return new Price(EARLY_DELETION_FEE_PER_GB_MONTH.divide(secondsPerMonth).multiply(seconds));
+      return new Price(monthlyStorageCostForBlob(numBytes).getValueInCents().divide(secondsPerMonth).multiply(seconds));
     }
 
     @Override
