@@ -299,9 +299,28 @@ public class BackerUpper {
   }
 
   private static boolean isSafeToForget(BackupIndex index, SystemId system, Path path, BackupIndex.Revision revision, long earliestBackupToKeep) {
+
+    // Diagram explaining hardlinks.
+    //
+    //                            earliestBackupToKeep
+    //                                     v
+    //      |    R1    |      R2     |     R3
+    // ---------------------------------------------
+    //      |          |             |
+    //  /a  |   file   |             |    file'
+    //      |          |             |
+    //  /b  |          |   hardlink  |
+    //      |          |    to /a    |
+    //
+    // The hardlink /b@R2 is NOT safe to forget because it does not
+    // have a newer version in R3.  However, /a@R1 IS safe to forget,
+    // even though /b@R2 refers to it, because in R3 /b actually refers
+    // to /a@R3, which will not be forgotten.
+
     return revision.backupNumber < earliestBackupToKeep
             && index.getInfo(system, path).stream().anyMatch(r -> revision.backupNumber < r.backupNumber && r.backupNumber <= earliestBackupToKeep)
-            && index.findHardLinksPointingTo(system, path, revision.backupNumber).stream().allMatch(hardlink -> isSafeToForget(index, system, path, hardlink, earliestBackupToKeep));
+//            && index.findHardLinksPointingTo(system, path, revision.backupNumber).stream().allMatch(hardlink -> isSafeToForget(index, system, path, hardlink, earliestBackupToKeep))
+            ;
   }
 
   @Value
