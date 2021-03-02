@@ -38,11 +38,13 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -430,6 +432,11 @@ public class BackerUpper {
     blobsToDelete.addAll(blobsExistingAtStart);
     blobsToDelete.removeAll(blobsExistingAtEnd);
 
+    Map<String, BackupReport> backedUpBlobsByIDAtTarget = index.listBlobs()
+            .map(index::lookupBlob)
+            .map(Objects::requireNonNull)
+            .collect(Collectors.toMap(BackupReport::getIdAtTarget, Function.identity()));
+
     return new CleanupPlan() {
       @Override
       public long blobsReclaimed() {
@@ -439,7 +446,7 @@ public class BackerUpper {
       @Override
       public long bytesReclaimed() {
         return blobsToDelete.stream()
-                .map(id -> index.lookupBlobByIdAtTarget(id))
+                .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
                 .mapToLong(BackupReport::getSizeAtTarget)
                 .sum();
@@ -448,7 +455,7 @@ public class BackerUpper {
       @Override
       public Price estimatedExecutionCost() {
         return blobsToDelete.stream()
-                .map(id -> index.lookupBlobByIdAtTarget(id))
+                .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
                 .map(report -> blobStorageCosts.costToDeleteBlob(report.getSizeAtTarget(), Duration.ZERO))
                 .reduce(Price.ZERO, Price::plus);
@@ -457,7 +464,7 @@ public class BackerUpper {
       @Override
       public Price estimatedMonthlyCost() {
         return blobsToDelete.stream()
-                .map(id -> index.lookupBlobByIdAtTarget(id))
+                .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
                 .mapToLong(BackupReport::getSizeAtTarget)
                 .mapToObj(blobStorageCosts::monthlyStorageCostForBlob)

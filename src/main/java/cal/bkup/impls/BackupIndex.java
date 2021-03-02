@@ -160,10 +160,6 @@ public class BackupIndex {
     return blobs.get(content);
   }
 
-  public synchronized @Nullable BackupReport lookupBlobByIdAtTarget(String idAtTarget) {
-    return blobs.values().stream().filter(info -> info.getIdAtTarget().equals(idAtTarget)).findAny().orElse(null);
-  }
-
   public synchronized void forgetBlob(Sha256AndSize content) {
     blobs.remove(content);
   }
