@@ -4,8 +4,12 @@ plugins {
     id "io.freefair.lombok" version "4.1.6"
 }
 
-sourceCompatibility = 12
-targetCompatibility = 12
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(12)
+    }
+}
+
 version = "1.0"
 
 ////////////////////////// Application setup
