@@ -37,6 +37,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.NoSuchElementException;
@@ -74,6 +75,7 @@ public class BackupTests {
           switch (rev.type) {
             case REGULAR_FILE:
               Assert.assertNotNull(blobDir.open(index.lookupBlob(rev.summary).getIdAtTarget()));
+              Assert.assertNotNull(index.lookupBlob(rev.summary));
               break;
             case HARD_LINK:
               Assert.assertNotNull(index.resolveHardLinkTarget(sys, rev));
@@ -500,6 +502,7 @@ public class BackupTests {
     // file should be gone
     index = backup.list(password).collect(Collectors.toList());
     Assert.assertEquals(index.size(), 0);
+    ensureWf(indexStore, blobDir, transform, password);
 
     System.out.println("index dir = " + indexDir);
     System.out.println("blob dir = " + blobDir);
@@ -696,6 +699,63 @@ public class BackupTests {
     backup.planCleanup(password, Duration.ofDays(5), FREE).execute();
 
     Assert.assertThrows(BackupIndex.MergeConflict.class, cleanupThatShouldFail::execute);
+    Assert.assertEquals(blobDir.list().count(), 1);
+    ensureWf(indexStore, blobDir, transform, password);
+  }
+
+
+  @Test
+  public void testCleanupDoesNotDeleteBlobsWithMultipleRefs() throws IOException, BackupIndex.MergeConflict {
+
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final var indexDir = new ConsistentInMemoryDir();
+    final var blobDir = new ConsistentInMemoryDir();
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), indexDir);
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    Instant fCreation = clock.now();
+    var fileA = new TestFile(Paths.get("tmp", "a"), fCreation, 1, "contents".getBytes(StandardCharsets.UTF_8));
+    var fileB = new TestFile(Paths.get("tmp", "b"), fCreation, 2, "contents".getBytes(StandardCharsets.UTF_8));
+
+    backup.backup(system, password, password,
+            Arrays.asList(fileA, fileB),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    var index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 2);
+    Assert.assertEquals(blobDir.list().count(), 1);
+
+    // next day, tombstone B
+    clock.timePasses(Duration.ofDays(1));
+    backup.backup(system, password, password,
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.singleton(fileB.getPath()));
+
+    index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 2);
+    Assert.assertEquals(blobDir.list().count(), 1);
+
+    // 10 days later, clean up everything older than 5 days
+    clock.timePasses(Duration.ofDays(10));
+    backup.planCleanup(password, Duration.ofDays(5), FREE).execute();
+
+    // contents of A should still be there
+    index = backup.list(password).collect(Collectors.toList());
+    Assert.assertEquals(index.size(), 1);
     Assert.assertEquals(blobDir.list().count(), 1);
     ensureWf(indexStore, blobDir, transform, password);
   }
