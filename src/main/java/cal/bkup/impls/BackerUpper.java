@@ -494,6 +494,8 @@ public class BackerUpper {
           index.forgetBlob(blob);
         }
 
+        index.checkIntegrity();
+
         System.out.println("Bumping cleanup generation and saving index");
         index.bumpCleanupGeneration();
         saveIndex(password, password, ConflictBehavior.ALWAYS_FAIL);

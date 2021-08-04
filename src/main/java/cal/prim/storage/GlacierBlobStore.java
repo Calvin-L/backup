@@ -2,7 +2,6 @@ package cal.prim.storage;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
-import cal.prim.storage.EventuallyConsistentBlobStore;
 import com.amazonaws.SdkClientException;
 import com.amazonaws.services.glacier.AmazonGlacier;
 import com.amazonaws.services.glacier.TreeHashGenerator;

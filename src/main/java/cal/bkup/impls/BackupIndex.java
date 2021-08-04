@@ -371,6 +371,34 @@ public class BackupIndex {
     return cleanupGeneration;
   }
 
+  public void checkIntegrity() {
+    List<String> errors = new ArrayList<>();
+    for (var sys : knownSystems()) {
+      for (var p : knownPaths(sys)) {
+        for (var rev : getInfo(sys, p)) {
+          switch (rev.type) {
+            case REGULAR_FILE:
+              if (lookupBlob(rev.summary) == null) {
+                errors.add(sys + ":" + p + "@" + rev + " contents missing (" + rev.summary + ")");
+              }
+              break;
+            case HARD_LINK:
+              if (resolveHardLinkTarget(sys, rev) == null) {
+                errors.add(sys + ":" + p + "@" + rev + " hard link target missing (" + rev.linkTarget + ")");
+              }
+              break;
+            case SOFT_LINK:
+            case TOMBSTONE:
+              break;
+          }
+        }
+      }
+    }
+    if (!errors.isEmpty()) {
+      throw new IllegalStateException(String.join("; ", errors));
+    }
+  }
+
   public static class MergeConflict extends Exception {
     public MergeConflict(String message) {
       super(message);

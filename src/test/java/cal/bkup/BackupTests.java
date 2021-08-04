@@ -102,7 +102,6 @@ public class BackupTests {
 
   @Test
   public void test() throws IOException, NoValue, BackupIndex.MergeConflict, ConsistentBlob.TagExpired {
-
     final SystemId system = new SystemId("foobar");
     final String password = "fizzbuzz";
 
@@ -201,6 +200,47 @@ public class BackupTests {
       System.out.println("latest revision for " + info.path() + ": " + info.latestRevision().type);
     });
 
+  }
+
+  @Test
+  public void testDuplicateFiles() throws IOException, BackupIndex.MergeConflict {
+
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), new InMemoryDir());
+    final InMemoryDir blobDir = new InMemoryDir();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            UnreliableWallClock.SYSTEM_CLOCK);
+
+    byte[] data = new byte[1024];
+    Arrays.fill(data, (byte) 33);
+
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, data.length, null) {
+      @Override
+      public InputStream open() {
+        return new ByteArrayInputStream(data);
+      }
+    };
+
+    RegularFile g = new RegularFile(Paths.get("/", "tmp", "other"), Instant.now(), data.length, null) {
+      @Override
+      public InputStream open() {
+        return new ByteArrayInputStream(data);
+      }
+    };
+
+    Collection<Path> toForget = Collections.emptyList();
+    backup.backup(system, password, password, Arrays.asList(f, g), Collections.emptyList(), Collections.emptyList(), toForget);
+
+    // Only one blob should be uploaded
+    Assert.assertEquals(blobDir.getPendingWrites().size(), 1);
   }
 
   @Test

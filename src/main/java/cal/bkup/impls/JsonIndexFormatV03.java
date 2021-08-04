@@ -101,7 +101,11 @@ public class JsonIndexFormatV03 implements IndexFormat {
           final var backup = index.findBackup(system, rev.backupNumber);
           if (rev.sha256 != null) {
             Instant modTime = instantFromInteger(rev.modTimeAsMillisecondsSinceEpoch);
-            index.appendRevision(system, backup, path, modTime, new Sha256AndSize(Util.stringToSha256(rev.sha256), rev.size));
+            try {
+              index.appendRevision(system, backup, path, modTime, new Sha256AndSize(Util.stringToSha256(rev.sha256), rev.size));
+            } catch (IllegalArgumentException exn) {
+              System.err.println("WARNING: missing content for file " + system + ":" + path + "; this may indicate a corrupted index!");
+            }
           } else if (rev.symLinkDst != null) {
             Path p = Paths.get(rev.symLinkDst);
             index.appendRevision(system, backup, path, new SymLink(path, p));
