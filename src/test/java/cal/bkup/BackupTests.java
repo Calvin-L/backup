@@ -800,4 +800,106 @@ public class BackupTests {
     ensureWf(indexStore, blobDir, transform, password);
   }
 
+  private static String stringify(InputStream data) throws IOException {
+    try (InputStream is = data) {
+      return new String(Util.read(is), StandardCharsets.UTF_8);
+    }
+  }
+
+  @Test
+  public void testRestore() throws IOException, BackupIndex.MergeConflict {
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), new InMemoryDir());
+    final InMemoryDir blobDir = new InMemoryDir();
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    Instant t1 = clock.now();
+    clock.timePasses(Duration.ofHours(1));
+    Instant t2 = clock.now();
+    var fileA = new TestFile(Paths.get("tmp", "a"), t1, 1, "contents1".getBytes(StandardCharsets.UTF_8));
+    var fileB = new TestFile(Paths.get("tmp", "b"), t1, 2, "contents1".getBytes(StandardCharsets.UTF_8));
+    var fileC = new TestFile(Paths.get("tmp", "c"), t2, 2, "contents2".getBytes(StandardCharsets.UTF_8));
+    var fileA2 = new TestFile(Paths.get("tmp", "a"), t2, 2, "contents3".getBytes(StandardCharsets.UTF_8));
+
+    backup.backup(system, password, password,
+            Arrays.asList(fileA, fileB),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    backup.backup(system, password, password,
+            Arrays.asList(fileC, fileA2),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList());
+
+    BackerUpper backup2 = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    BackupIndex index = backup2.getIndex(password);
+    index.checkIntegrity();
+
+    Assert.assertEquals(index.knownBackups(system).size(), 2);
+
+    // need retries because blob dir is eventually-consistent
+
+    for (;;) {
+      try {
+        Assert.assertEquals(
+                stringify(backup2.restore(password, index.getInfo(system, fileA.getPath()).get(0).summary)),
+                "contents1");
+        break;
+      } catch (NoSuchFileException ignored) {
+        continue;
+      }
+    }
+
+    for (;;) {
+      try {
+        Assert.assertEquals(
+                stringify(backup2.restore(password, index.getInfo(system, fileA.getPath()).get(1).summary)),
+                "contents3");
+        break;
+      } catch (NoSuchFileException ignored) {
+        continue;
+      }
+    }
+
+    for (;;) {
+      try {
+        Assert.assertEquals(
+                stringify(backup2.restore(password, index.getInfo(system, fileB.getPath()).get(0).summary)),
+                "contents1");
+        break;
+      } catch (NoSuchFileException ignored) {
+        continue;
+      }
+    }
+
+    for (;;) {
+      try {
+        Assert.assertEquals(
+                stringify(backup2.restore(password, index.getInfo(system, fileC.getPath()).get(0).summary)),
+                "contents2");
+        break;
+      } catch (NoSuchFileException ignored) {
+        continue;
+      }
+    }
+  }
+
 }
