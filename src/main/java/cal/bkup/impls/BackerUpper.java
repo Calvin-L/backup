@@ -186,7 +186,7 @@ public class BackerUpper {
     })) {
       BackupIndex.BackupMetadata backupId = null;
 
-      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2 + symlinks.size() + hardlinks.size() + toForget.size())) {
+      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2L + symlinks.size() + hardlinks.size() + toForget.size())) {
         loadIndexIfMissing(currentPassword);
 
         var lastIndexSave = durationClock.sample();
@@ -218,23 +218,6 @@ public class BackerUpper {
             lastIndexSave = now;
           }
         }
-
-//        for (var f : files) {
-//          if (!keepRunning.get()) {
-//            return;
-//          }
-//          try {
-//            uploadAndAddToIndex(index, whatSystemIsThis, backupId, f, progress);
-//          } catch (NoSuchFileException ignored2) {
-//            warnings.add("The file " + f.getPath() + " was deleted before it could be backed up");
-//          }
-//          var now = durationClock.sample();
-//          if (Util.ge(durationClock.timeBetweenSamples(lastIndexSave, now), PERIODIC_INDEX_RATE)) {
-//            saveIndex(currentPassword, newPasswordForIndex, ConflictBehavior.TRY_MERGE);
-//            currentPassword = newPasswordForIndex;
-//            lastIndexSave = now;
-//          }
-//        }
 
         for (var link : symlinks) {
           ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
@@ -331,9 +314,8 @@ public class BackerUpper {
   private Sha256AndSize summarize(RegularFile f, ProgressDisplay display) throws IOException {
     ProgressDisplay.Task checksumTask = display.startTask("checksum " + f.getPath());
     try (InputStream in = Util.buffered(f.open())) {
-      return Util.summarize(in, stream -> {
-        display.reportProgress(checksumTask, stream.getBytesRead(), f.getSizeInBytes());
-      });
+      return Util.summarize(in, stream ->
+              display.reportProgress(checksumTask, stream.getBytesRead(), f.getSizeInBytes()));
     } finally {
       display.finishTask(checksumTask);
     }
@@ -627,9 +609,8 @@ public class BackerUpper {
       InputStream current;
       ProgressDisplay.Task task;
 
-      final Consumer<StatisticsCollectingInputStream> reportProgress = s -> {
-        display.reportProgress(task, s.getBytesRead(), currentFile.getSizeInBytes());
-      };
+      final Consumer<StatisticsCollectingInputStream> reportProgress = s ->
+              display.reportProgress(task, s.getBytesRead(), currentFile.getSizeInBytes());
 
       {
         openNext();
@@ -713,61 +694,6 @@ public class BackerUpper {
 
     return finalReports;
   }
-
-//  /**
-//   *
-//   * @param index
-//   * @param systemId
-//   * @param f
-//   * @param display
-//   * @throws NoSuchFileException if another process deletes the file before or during upload
-//   * @throws IOException
-//   */
-//  private void uploadAndAddToIndex(BackupIndex index, SystemId systemId, BackupIndex.BackupMetadata backupId, RegularFile f, ProgressDisplay display) throws IOException {
-//    // (1) Get the modification time.
-//    // This has to happen before computing the checksum.  Otherwise,
-//    // we might miss a new revision of the file on a future backup.
-//    // This could happen if the file changes after computing the
-//    // checksum but before reading the modification time.
-//    Instant modTime = f.getModTime();
-//
-//    // (2) Checksum the path.
-//    Sha256AndSize summary = summarize(f, display);
-//
-//    // (3) Is this file known to the index?  Then no problem!
-//    BackupReport report = index.lookupBlob(summary);
-//
-//    // (4) Not known?  Upload it!
-//    String uploadDescription = "upload " + f.getPath();
-//    if (report == null) {
-//      ProgressDisplay.Task task = display.startTask(uploadDescription);
-//      String key = Util.randomPassword();
-//      Consumer<StatisticsCollectingInputStream> reportProgress = s -> {
-//        display.reportProgress(task, s.getBytesRead(), f.getSizeInBytes());
-//      };
-//      String identifier;
-//      long sizeAtTarget;
-//      StatisticsCollectingInputStream in = new StatisticsCollectingInputStream(Util.buffered(f.open()), reportProgress);
-//      try (InputStream transformed = transformer.followedBy(new Encryption(key)).apply(in)) {
-//        EventuallyConsistentBlobStore.PutResult result = blobStore.put(transformed);
-//        identifier = result.getIdentifier();
-//        sizeAtTarget = result.getBytesStored();
-//      } finally {
-//        display.finishTask(task); // TODO: print identifier and byte count?
-//      }
-//      assert in.isClosed();
-//      long size = in.getBytesRead();
-//      byte[] sha256 = in.getSha256Digest();
-//      report = new BackupReport(identifier, 0, sizeAtTarget, key);
-//      summary = new Sha256AndSize(sha256, size);
-//      index.addBackedUpBlob(summary, report);
-//    } else {
-//      display.skipTask(uploadDescription, "Data is already present");
-//    }
-//
-//    // Record the latest details.
-//    index.appendRevision(systemId, backupId, f.getPath(), modTime, summary);
-//  }
 
   // -------------------------------------------------------------------------
   // Helpers for managing the index
