@@ -45,7 +45,7 @@ public class VersionedIndexFormatTests {
     }
     index.addBackedUpBlob(
             summary,
-            new BackupReport("foo", 10, "backupname"));
+            new BackupReport("foo", 0, 10, "backupname"));
 
     var system = new SystemId("test-system");
     var backup = index.startBackup(system, Instant.now());

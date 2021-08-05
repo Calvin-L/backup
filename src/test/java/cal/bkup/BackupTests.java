@@ -2,7 +2,7 @@ package cal.bkup;
 
 import cal.bkup.impls.BackerUpper;
 import cal.bkup.impls.BackupIndex;
-import cal.bkup.impls.JsonIndexFormatV03;
+import cal.bkup.impls.JsonIndexFormatV04;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
@@ -65,7 +65,7 @@ public class BackupTests {
     }
   };
 
-  private static final IndexFormat FORMAT = new JsonIndexFormatV03();
+  private static final IndexFormat FORMAT = new JsonIndexFormatV04();
 
   private void ensureWf(ConsistentBlob indexStore, ConsistentInMemoryDir blobDir, BlobTransformer transform, String password) throws IOException {
     BackupIndex index = new BackerUpper(indexStore, FORMAT, new BlobStoreOnDirectory(blobDir), transform, new TestClock()).getIndex(password);

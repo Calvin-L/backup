@@ -84,7 +84,7 @@ public class JsonIndexFormatV03 implements IndexFormat {
     for (JsonBlob blob : f.blobs) {
       index.addBackedUpBlob(
               new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size),
-              new BackupReport(blob.backupId, blob.backupSize, blob.key));
+              new BackupReport(blob.backupId, 0, blob.backupSize, blob.key));
     }
     for (var entry : f.history.entrySet()) {
       for (JsonBackupInfo b : entry.getValue()) {

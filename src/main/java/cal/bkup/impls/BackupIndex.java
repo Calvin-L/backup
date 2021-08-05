@@ -175,6 +175,11 @@ public class BackupIndex {
     }
   }
 
+  public synchronized BackupReport addOrCanonicalizeBackedUpBlob(Sha256AndSize content, BackupReport backupReport) {
+    BackupReport previous = blobs.putIfAbsent(content, backupReport);
+    return previous != null ? previous : backupReport;
+  }
+
   public synchronized Set<SystemId> knownSystems() {
     return ImmutableSet.copyOf(files.keySet());
   }

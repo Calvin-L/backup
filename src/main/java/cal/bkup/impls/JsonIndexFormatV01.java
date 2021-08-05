@@ -72,7 +72,7 @@ public class JsonIndexFormatV01 implements IndexFormat {
     for (JsonBlob blob : f.blobs) {
       index.addBackedUpBlob(
               new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size),
-              new BackupReport(blob.backupId, blob.backupSize, blob.key));
+              new BackupReport(blob.backupId, 0, blob.backupSize, blob.key));
     }
     Map<SystemId, BackupIndex.BackupMetadata> meta = new HashMap<>();
     for (Map.Entry<String, Map<String, List<Revision>>> entry : f.files.entrySet()) {

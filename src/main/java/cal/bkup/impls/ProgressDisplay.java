@@ -54,8 +54,8 @@ public class ProgressDisplay implements QuietAutoCloseable {
     System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(task.progress, task.denominator) + "] " + task.description);
   }
 
-  private void printSkippedTask(String description) {
-    System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(1L, 1L) + "] skipped: " + description);
+  private void printSkippedTask(String taskDescription, String why) {
+    System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(1L, 1L) + "] skipped: " + taskDescription + " (" + why + ')');
   }
 
   public synchronized Task startTask(String description) {
@@ -87,9 +87,9 @@ public class ProgressDisplay implements QuietAutoCloseable {
     printTask(task);
   }
 
-  public synchronized void skipTask(String description) {
+  public synchronized void skipTask(String taskDescription, String why) {
     ++totalComplete;
-    printSkippedTask(description);
+    printSkippedTask(taskDescription, why);
     refreshDisplay.run();
   }
 

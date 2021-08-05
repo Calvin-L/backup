@@ -17,6 +17,12 @@ public class BackupReport {
   @NonNull String idAtTarget;
 
   /**
+   * The offset, in bytes, of the file contents within the target store
+   * entity named by {@link #idAtTarget}.
+   */
+  long offsetAtAtTarget;
+
+  /**
    * The number of bytes stored by the backup target to contain the data.
    * The backup target might perform transformations on the data
    * (such as compression or encryption).

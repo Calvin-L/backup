@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class JsonIndexFormatV02 implements IndexFormat {
+public class JsonIndexFormatV04 implements IndexFormat {
 
   private static class JsonBackupInfo {
     public BigInteger startTimeAsMillisecondsSinceEpoch;
@@ -49,6 +49,7 @@ public class JsonIndexFormatV02 implements IndexFormat {
     public String sha256;
     public long size;
     public String backupId;
+    public long backupOffset;
     public long backupSize;
   }
 
@@ -56,11 +57,12 @@ public class JsonIndexFormatV02 implements IndexFormat {
     public Map<String, List<JsonBackupInfo>> history = new HashMap<>();
     public Map<String, Map<String, List<JsonRevision>>> files = new HashMap<>();
     public Set<JsonBlob> blobs = new HashSet<>();
+    public BigInteger cleanupGeneration = BigInteger.ZERO;
   }
 
   private final ObjectMapper mapper;
 
-  public JsonIndexFormatV02() {
+  public JsonIndexFormatV04() {
     mapper = new ObjectMapper();
     mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
   }
@@ -83,7 +85,7 @@ public class JsonIndexFormatV02 implements IndexFormat {
     for (JsonBlob blob : f.blobs) {
       index.addBackedUpBlob(
               new Sha256AndSize(Util.stringToSha256(blob.sha256), blob.size),
-              new BackupReport(blob.backupId, 0, blob.backupSize, blob.key));
+              new BackupReport(blob.backupId, blob.backupOffset, blob.backupSize, blob.key));
     }
     for (var entry : f.history.entrySet()) {
       for (JsonBackupInfo b : entry.getValue()) {
@@ -92,7 +94,6 @@ public class JsonIndexFormatV02 implements IndexFormat {
                 new BackupIndex.BackupMetadata(instantFromInteger(b.startTimeAsMillisecondsSinceEpoch), instantFromInteger(b.endTimeAsMillisecondsSinceEpoch), b.backupNumber));
       }
     }
-    Map<SystemId, BackupIndex.BackupMetadata> meta = new HashMap<>();
     for (Map.Entry<String, Map<String, List<JsonRevision>>> entry : f.files.entrySet()) {
       SystemId system = new SystemId(entry.getKey());
       for (Map.Entry<String, List<JsonRevision>> entry2 : entry.getValue().entrySet()) {
@@ -101,7 +102,11 @@ public class JsonIndexFormatV02 implements IndexFormat {
           final var backup = index.findBackup(system, rev.backupNumber);
           if (rev.sha256 != null) {
             Instant modTime = instantFromInteger(rev.modTimeAsMillisecondsSinceEpoch);
-            index.appendRevision(system, backup, path, modTime, new Sha256AndSize(Util.stringToSha256(rev.sha256), rev.size));
+            try {
+              index.appendRevision(system, backup, path, modTime, new Sha256AndSize(Util.stringToSha256(rev.sha256), rev.size));
+            } catch (IllegalArgumentException exn) {
+              System.err.println("WARNING: missing content for file " + system + ":" + path + "; this may indicate a corrupted index!");
+            }
           } else if (rev.symLinkDst != null) {
             Path p = Paths.get(rev.symLinkDst);
             index.appendRevision(system, backup, path, new SymLink(path, p));
@@ -114,6 +119,7 @@ public class JsonIndexFormatV02 implements IndexFormat {
         }
       }
     }
+    index.setCleanupGeneration(f.cleanupGeneration);
     return index;
   }
 
@@ -134,6 +140,7 @@ public class JsonIndexFormatV02 implements IndexFormat {
       blob.sha256 = Util.sha256toString(b.getSha256());
       blob.size = b.getSize();
       blob.backupId = report.getIdAtTarget();
+      blob.backupOffset = report.getOffsetAtAtTarget();
       blob.backupSize = report.getSizeAtTarget();
       result.blobs.add(blob);
     });
@@ -147,6 +154,8 @@ public class JsonIndexFormatV02 implements IndexFormat {
         }
       });
     });
+
+    result.cleanupGeneration = index.getCleanupGeneration();
 
     return result;
   }
