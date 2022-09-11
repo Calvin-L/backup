@@ -2,7 +2,6 @@ package cal.bkup;
 
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.EncryptedInputStream;
-import com.amazonaws.util.StringInputStream;
 import es.vocali.util.AESCrypt;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -12,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.function.Function;
@@ -116,7 +116,7 @@ public class Encryption {
     do {
       Assert.assertEquals(
           new String(DecryptedInputStream.decrypt(
-              new EncryptedInputStream(new SlowStream(new StringInputStream(data)), password),
+              new EncryptedInputStream(new SlowStream(new ByteArrayInputStream(data.getBytes(StandardCharsets.UTF_8))), password),
               password)),
           data);
       data = data + data;

@@ -34,10 +34,6 @@ import cal.prim.storage.S3Directory;
 import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.XZCompression;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
-import com.amazonaws.services.dynamodbv2.document.DynamoDB;
-import com.amazonaws.services.glacier.AmazonGlacierClientBuilder;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,6 +44,10 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.math3.fraction.BigFraction;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.glacier.GlacierClient;
+import software.amazon.awssdk.services.s3.S3Client;
 
 import java.io.BufferedInputStream;
 import java.io.Console;
@@ -73,7 +73,7 @@ import java.util.stream.Collectors;
 
 public class Main {
 
-  private static final String AWS_REGION = "us-east-2";
+  private static final Region AWS_REGION = Region.US_EAST_2;
   private static final String GLACIER_VAULT_NAME = "blobs";
   private static final String S3_BUCKET = "backupindex";
   private static final String DYNAMO_TABLE = "backupconsistency";
@@ -172,9 +172,17 @@ public class Main {
     }
 
     final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword("Password");
-    final String newPassword = cli.hasOption('P')
-            ? (cli.getOptionValue('P').isEmpty() ? Util.readPassword("New password") : cli.getOptionValue('P'))
-            : password;
+    String newPassword = password;
+    if (cli.hasOption('P')) {
+      if (cli.getOptionValue('P').isEmpty()) {
+        newPassword = Util.readPassword("New password");
+        if (newPassword != null && !Util.confirmPassword(newPassword)) {
+          newPassword = null;
+        }
+      } else {
+        newPassword = cli.getOptionValue('P');
+      }
+    }
 
     if (password == null || newPassword == null) {
       System.err.println("No password; refusing to proceed");
@@ -227,29 +235,26 @@ public class Main {
       var credentials = AWSTools.credentialsProvider();
 
       StringRegister register = new DynamoDBStringRegister(
-              new DynamoDB(AmazonDynamoDBClientBuilder
-                      .standard()
-                      .withRegion(AWS_REGION)
-                      .withCredentials(credentials)
-                      .build()),
+              DynamoDbClient.builder()
+                      .credentialsProvider(credentials)
+                      .region(AWS_REGION)
+                      .build(),
               DYNAMO_TABLE,
               DYNAMO_REGISTER);
 
       EventuallyConsistentDirectory dir = new S3Directory(
-              AmazonS3ClientBuilder
-                      .standard()
-                      .withCredentials(credentials)
-                      .withRegion(AWS_REGION)
+              S3Client.builder()
+                      .credentialsProvider(credentials)
+                      .region(AWS_REGION)
                       .build(),
               S3_BUCKET);
 
       ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
 
       EventuallyConsistentBlobStore blobStore = new GlacierBlobStore(
-              AmazonGlacierClientBuilder
-                      .standard()
-                      .withCredentials(credentials)
-                      .withRegion(AWS_REGION)
+              GlacierClient.builder()
+                      .credentialsProvider(credentials)
+                      .region(AWS_REGION)
                       .build(),
               GLACIER_VAULT_NAME);
 

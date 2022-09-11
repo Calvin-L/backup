@@ -1,3 +1,4 @@
 rootProject.name = "bkup"
 include("aes-crypt")
 include("crash-safe-io")
+include("aws-ports")

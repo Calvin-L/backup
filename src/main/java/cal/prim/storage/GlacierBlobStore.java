@@ -2,33 +2,34 @@ package cal.prim.storage;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
-import com.amazonaws.SdkClientException;
-import com.amazonaws.services.glacier.AmazonGlacier;
 import com.amazonaws.services.glacier.TreeHashGenerator;
-import com.amazonaws.services.glacier.model.CompleteMultipartUploadRequest;
-import com.amazonaws.services.glacier.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.glacier.model.CreateVaultRequest;
-import com.amazonaws.services.glacier.model.DeleteArchiveRequest;
-import com.amazonaws.services.glacier.model.DescribeJobRequest;
-import com.amazonaws.services.glacier.model.DescribeJobResult;
-import com.amazonaws.services.glacier.model.GetJobOutputRequest;
-import com.amazonaws.services.glacier.model.GetJobOutputResult;
-import com.amazonaws.services.glacier.model.GlacierJobDescription;
-import com.amazonaws.services.glacier.model.InitiateJobRequest;
-import com.amazonaws.services.glacier.model.InitiateJobResult;
-import com.amazonaws.services.glacier.model.InitiateMultipartUploadRequest;
-import com.amazonaws.services.glacier.model.InitiateMultipartUploadResult;
-import com.amazonaws.services.glacier.model.JobParameters;
-import com.amazonaws.services.glacier.model.ListJobsRequest;
-import com.amazonaws.services.glacier.model.ListJobsResult;
-import com.amazonaws.services.glacier.model.StatusCode;
-import com.amazonaws.services.glacier.model.UploadArchiveRequest;
-import com.amazonaws.services.glacier.model.UploadArchiveResult;
-import com.amazonaws.services.glacier.model.UploadMultipartPartRequest;
-import com.amazonaws.util.BinaryUtils;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.glacier.GlacierClient;
+import software.amazon.awssdk.services.glacier.model.ActionCode;
+import software.amazon.awssdk.services.glacier.model.CompleteMultipartUploadRequest;
+import software.amazon.awssdk.services.glacier.model.CompleteMultipartUploadResponse;
+import software.amazon.awssdk.services.glacier.model.CreateVaultRequest;
+import software.amazon.awssdk.services.glacier.model.DeleteArchiveRequest;
+import software.amazon.awssdk.services.glacier.model.DescribeJobRequest;
+import software.amazon.awssdk.services.glacier.model.DescribeJobResponse;
+import software.amazon.awssdk.services.glacier.model.GetJobOutputRequest;
+import software.amazon.awssdk.services.glacier.model.GlacierJobDescription;
+import software.amazon.awssdk.services.glacier.model.InitiateJobRequest;
+import software.amazon.awssdk.services.glacier.model.InitiateJobResponse;
+import software.amazon.awssdk.services.glacier.model.InitiateMultipartUploadRequest;
+import software.amazon.awssdk.services.glacier.model.InitiateMultipartUploadResponse;
+import software.amazon.awssdk.services.glacier.model.JobParameters;
+import software.amazon.awssdk.services.glacier.model.ListJobsRequest;
+import software.amazon.awssdk.services.glacier.model.ListJobsResponse;
+import software.amazon.awssdk.services.glacier.model.StatusCode;
+import software.amazon.awssdk.services.glacier.model.UploadArchiveRequest;
+import software.amazon.awssdk.services.glacier.model.UploadArchiveResponse;
+import software.amazon.awssdk.services.glacier.model.UploadMultipartPartRequest;
+import software.amazon.awssdk.utils.BinaryUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
@@ -36,6 +37,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -45,9 +47,10 @@ import java.util.stream.Stream;
 
 public class GlacierBlobStore implements EventuallyConsistentBlobStore {
 
-  private static void createVaultIfMissing(AmazonGlacier client, String vaultName) {
-    CreateVaultRequest req = new CreateVaultRequest()
-            .withVaultName(vaultName);
+  private static void createVaultIfMissing(GlacierClient client, String vaultName) {
+    CreateVaultRequest req = CreateVaultRequest.builder()
+            .vaultName(vaultName)
+            .build();
     client.createVault(req);
   }
 
@@ -57,10 +60,10 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
    */
   private static final int UPLOAD_CHUNK_SIZE = AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK;
 
-  private final AmazonGlacier client;
+  private final GlacierClient client;
   private final String vaultName;
 
-  public GlacierBlobStore(AmazonGlacier client, String vaultName) {
+  public GlacierBlobStore(GlacierClient client, String vaultName) {
     createVaultIfMissing(client, vaultName);
     this.client = client;
     this.vaultName = vaultName;
@@ -76,7 +79,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
       } else {
         return doMultipartUpload(buffer, data);
       }
-    } catch (SdkClientException e) {
+    } catch (AwsServiceException e) {
       throw new IOException(e);
     }
   }
@@ -87,57 +90,59 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
    * @param data a stream containing the rest of the data (NOTE: this procedure modifies the
    *             array, and its size is the upload part size)
    * @return the identifier of the uploaded object
-   * @throws SdkClientException on error
+   * @throws AwsServiceException on error
    * @throws IOException on error
    */
   private PutResult doMultipartUpload(byte[] buffer, InputStream data) throws IOException {
     List<byte[]> binaryChecksums = new ArrayList<>();
 
-    InitiateMultipartUploadResult init = client.initiateMultipartUpload(
-            new InitiateMultipartUploadRequest()
-                    .withVaultName(vaultName)
-                    .withPartSize(Integer.toString(UPLOAD_CHUNK_SIZE)));
-    String id = init.getUploadId();
+    InitiateMultipartUploadResponse init = client.initiateMultipartUpload(
+            InitiateMultipartUploadRequest.builder()
+                    .vaultName(vaultName)
+                    .partSize(Integer.toString(UPLOAD_CHUNK_SIZE))
+                    .build());
+    String id = init.uploadId();
 
     long total = 0;
     int n = buffer.length;
     do {
       String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(buffer, 0, n));
       binaryChecksums.add(BinaryUtils.fromHex(checksum));
-      UploadMultipartPartRequest partRequest = new UploadMultipartPartRequest()
-              .withVaultName(vaultName)
-              .withUploadId(id)
-              .withBody(new ByteArrayInputStream(buffer, 0, n))
-              .withChecksum(checksum)
-              .withRange(String.format("bytes %s-%s/*", total, total + n - 1));
+      UploadMultipartPartRequest partRequest = UploadMultipartPartRequest.builder()
+              .vaultName(vaultName)
+              .uploadId(id)
+              .checksum(checksum)
+              .range(String.format("bytes %s-%s/*", total, total + n - 1))
+              .build();
 
-      client.uploadMultipartPart(partRequest);
+      client.uploadMultipartPart(partRequest, RequestBody.fromByteBuffer(ByteBuffer.wrap(buffer, 0, n)));
       total += n;
       n = Util.readChunk(data, buffer);
     } while (n > 0);
 
     String checksum = TreeHashGenerator.calculateTreeHash(binaryChecksums);
-    CompleteMultipartUploadRequest compRequest = new CompleteMultipartUploadRequest()
-            .withVaultName(vaultName)
-            .withUploadId(id)
-            .withChecksum(checksum)
-            .withArchiveSize(Long.toString(total));
+    CompleteMultipartUploadRequest compRequest = CompleteMultipartUploadRequest.builder()
+            .vaultName(vaultName)
+            .uploadId(id)
+            .checksum(checksum)
+            .archiveSize(Long.toString(total))
+            .build();
 
-    CompleteMultipartUploadResult compResult = client.completeMultipartUpload(compRequest);
-    String resultId = compResult.getArchiveId();
+    CompleteMultipartUploadResponse compResult = client.completeMultipartUpload(compRequest);
+    String resultId = compResult.archiveId();
     final long grandTotal = total;
     return new PutResult(resultId, grandTotal);
   }
 
-  private PutResult uploadBytes(byte[] bytes, int n) {
+  private PutResult uploadBytes(byte[] bytes, int n) throws IOException {
     String checksum = TreeHashGenerator.calculateTreeHash(new ByteArrayInputStream(bytes, 0, n));
-    UploadArchiveRequest req = new UploadArchiveRequest()
-            .withVaultName(vaultName)
-            .withChecksum(checksum)
-            .withContentLength((long)n)
-            .withBody(new ByteArrayInputStream(bytes, 0, n));
-    UploadArchiveResult res = client.uploadArchive(req);
-    String id = res.getArchiveId();
+    UploadArchiveRequest req = UploadArchiveRequest.builder()
+            .vaultName(vaultName)
+            .checksum(checksum)
+            .contentLength((long)n)
+            .build();
+    UploadArchiveResponse res = client.uploadArchive(req, RequestBody.fromByteBuffer(ByteBuffer.wrap(bytes, 0, n)));
+    String id = res.archiveId();
     return new PutResult(id, n);
   }
 
@@ -149,14 +154,14 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
       System.out.println("Finding job...");
       String jobId = null;
       boolean complete = false;
-      ListJobsResult res = client.listJobs(new ListJobsRequest().withVaultName(vaultName));
-      for (GlacierJobDescription job : res.getJobList()) {
+      ListJobsResponse res = client.listJobs(ListJobsRequest.builder().vaultName(vaultName).build());
+      for (GlacierJobDescription job : res.jobList()) {
         // TODO: proper handling for the ARN
-        if (job.getAction().equals("InventoryRetrieval") &&
-                job.getVaultARN().contains(vaultName) &&
-                !job.getStatusCode().equals(StatusCode.Failed.toString())) {
-          jobId = job.getJobId();
-          complete = job.getCompleted();
+        if (job.action().equals(ActionCode.INVENTORY_RETRIEVAL) &&
+                job.vaultARN().contains(vaultName) &&
+                !job.statusCode().equals(StatusCode.FAILED)) {
+          jobId = job.jobId();
+          complete = job.completed();
           System.out.println("Found job " + jobId + " [complete=" + complete + ']');
           break;
         }
@@ -164,11 +169,13 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
 
       // 2. if missing, initiate job
       if (jobId == null) {
-        InitiateJobResult initJobRes = client.initiateJob(new InitiateJobRequest()
-                .withVaultName(vaultName)
-                .withJobParameters(new JobParameters()
-                        .withType("inventory-retrieval")));
-        jobId = initJobRes.getJobId();
+        InitiateJobResponse initJobRes = client.initiateJob(InitiateJobRequest.builder()
+                .vaultName(vaultName)
+                .jobParameters(JobParameters.builder()
+                        .type("inventory-retrieval")
+                        .build())
+                .build());
+        jobId = initJobRes.jobId();
         System.out.println("Created new job " + jobId);
       }
 
@@ -182,24 +189,24 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
           throw new IOException(e);
         }
 
-        DescribeJobResult jobInfo = client.describeJob(new DescribeJobRequest()
-                .withVaultName(vaultName)
-                .withJobId(jobId));
+        DescribeJobResponse jobInfo = client.describeJob(DescribeJobRequest.builder()
+                .vaultName(vaultName)
+                .jobId(jobId)
+                .build());
 
-        System.out.println("status=" + jobInfo.getStatusCode());
-        if (jobInfo.getStatusCode().equals(StatusCode.Failed.toString())) {
+        System.out.println("status=" + jobInfo.statusCode());
+        if (jobInfo.statusCode().equals(StatusCode.FAILED)) {
           throw new IOException("job " + jobId + " failed");
         }
 
-        complete = jobInfo.isCompleted();
+        complete = jobInfo.completed();
       }
 
       // 4. download job result
-      GetJobOutputResult outputResult = client.getJobOutput(new GetJobOutputRequest()
-              .withVaultName(vaultName)
-              .withJobId(jobId));
-
-      try (InputStream output = outputResult.getBody();
+      try (InputStream output = client.getJobOutput(GetJobOutputRequest.builder()
+              .vaultName(vaultName)
+              .jobId(jobId)
+              .build());
            OutputStream dest = new FileOutputStream(listLoc.toString())) {
         Util.copyStream(output, dest);
       }
@@ -266,40 +273,44 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
   @Override
   public void delete(String name) throws IOException {
     try {
-      client.deleteArchive(new DeleteArchiveRequest()
-              .withVaultName(vaultName)
-              .withArchiveId(name));
-    } catch (SdkClientException e) {
+      client.deleteArchive(DeleteArchiveRequest.builder()
+              .vaultName(vaultName)
+              .archiveId(name)
+              .build());
+    } catch (AwsServiceException e) {
       throw new IOException(e);
     }
   }
 
   @Override
   public InputStream open(String name) throws IOException {
-    InitiateJobResult initJobRes = client.initiateJob(new InitiateJobRequest()
-            .withVaultName(vaultName)
-            .withJobParameters(new JobParameters()
-                    .withType("archive-retrieval")
-                    .withTier("Expedited")
-                    .withArchiveId(name)));
-    String jobId = initJobRes.getJobId();
+    InitiateJobResponse initJobRes = client.initiateJob(InitiateJobRequest.builder()
+            .vaultName(vaultName)
+            .jobParameters(JobParameters.builder()
+                    .type("archive-retrieval")
+                    .tier("Expedited")
+                    .archiveId(name)
+                    .build())
+            .build());
+    String jobId = initJobRes.jobId();
     System.out.println("Created new job " + jobId);
 
     while (true) {
-      DescribeJobResult jobInfo = client.describeJob(new DescribeJobRequest()
-              .withVaultName(vaultName)
-              .withJobId(jobId));
+      DescribeJobResponse jobInfo = client.describeJob(DescribeJobRequest.builder()
+              .vaultName(vaultName)
+              .jobId(jobId)
+              .build());
 
-      if (jobInfo.getStatusCode().equals(StatusCode.Failed.toString())) {
+      if (jobInfo.statusCode().equals(StatusCode.FAILED)) {
         throw new IOException("job " + jobId + " failed");
       }
 
-      if (jobInfo.isCompleted()) {
+      if (jobInfo.completed()) {
         System.out.println("Archive " + name + " is available");
-        GetJobOutputResult outputResult = client.getJobOutput(new GetJobOutputRequest()
-                .withVaultName(vaultName)
-                .withJobId(jobId));
-        return outputResult.getBody();
+        return client.getJobOutput(GetJobOutputRequest.builder()
+                .vaultName(vaultName)
+                .jobId(jobId)
+                .build());
       }
       try {
         Thread.sleep(1000L * 60L * 5L); // sleep 5 minutes

@@ -2,21 +2,28 @@ package cal.prim.storage;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
-import com.amazonaws.AmazonServiceException;
-import com.amazonaws.SdkClientException;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.CompleteMultipartUploadRequest;
-import com.amazonaws.services.s3.model.InitiateMultipartUploadRequest;
-import com.amazonaws.services.s3.model.InitiateMultipartUploadResult;
-import com.amazonaws.services.s3.model.ObjectListing;
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
-import com.amazonaws.services.s3.model.UploadPartRequest;
-import com.amazonaws.services.s3.model.UploadPartResult;
+import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
+import software.amazon.awssdk.services.s3.model.CreateMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Object;
+import software.amazon.awssdk.services.s3.model.UploadPartRequest;
+import software.amazon.awssdk.services.s3.model.UploadPartResponse;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -29,13 +36,15 @@ import java.util.stream.StreamSupport;
 public class S3Directory implements EventuallyConsistentDirectory {
 
   private final String bucket;
-  private final AmazonS3 s3client;
+  private final S3Client s3client;
 
-  public S3Directory(AmazonS3 s3client, String bucketName) {
+  public S3Directory(S3Client s3client, String bucketName) {
     this.bucket = bucketName;
     this.s3client = s3client;
-    if (!s3client.doesBucketExistV2(bucketName)) {
-      s3client.createBucket(bucketName);
+    try {
+      s3client.headBucket(HeadBucketRequest.builder().bucket(bucketName).build());
+    } catch (NoSuchBucketException e) {
+      s3client.createBucket(CreateBucketRequest.builder().bucket(bucketName).build());
     }
 //    s3client.setBucketLifecycleConfiguration(
 //        new SetBucketLifecycleConfigurationRequest(bucketName,
@@ -49,25 +58,31 @@ public class S3Directory implements EventuallyConsistentDirectory {
 
   @Override
   public Stream<String> list() throws IOException {
-    ObjectListing initialListing;
+    ListObjectsV2Request request =
+              ListObjectsV2Request.builder()
+                      .bucket(bucket)
+                      .build();
+    ListObjectsV2Response initialListing;
     try {
-      initialListing = s3client.listObjects(bucket);
+      initialListing = s3client.listObjectsV2(request);
     } catch (SdkClientException e) {
       throw new IOException(e);
     }
 
     return StreamSupport.stream(new Spliterator<>() {
-      ObjectListing listing = initialListing;
-      Iterator<S3ObjectSummary> current = listing.getObjectSummaries().iterator();
+      ListObjectsV2Response listing = initialListing;
+      Iterator<S3Object> current = listing.contents().iterator();
 
       @Override
       public boolean tryAdvance(Consumer<? super String> action) {
         if (!current.hasNext() && listing.isTruncated()) {
-          listing = s3client.listNextBatchOfObjects(listing);
-          current = listing.getObjectSummaries().iterator();
+          listing = s3client.listObjectsV2(request.toBuilder()
+                  .continuationToken(listing.continuationToken())
+                  .build());
+          current = listing.contents().iterator();
         }
         if (current.hasNext()) {
-          action.accept(current.next().getKey());
+          action.accept(current.next().key());
           return true;
         } else {
           return false;
@@ -102,35 +117,36 @@ public class S3Directory implements EventuallyConsistentDirectory {
    */
   private void doMultipartUpload(String name, byte[] buffer, InputStream stream) throws IOException {
     // Ugh, wish the API would do this multipart nonsense for us.
-    InitiateMultipartUploadResult result = s3client.initiateMultipartUpload(new InitiateMultipartUploadRequest(bucket, name));
-    String uploadId = result.getUploadId();
+    CreateMultipartUploadResponse result = s3client.createMultipartUpload(
+            CreateMultipartUploadRequest.builder().bucket(bucket).key(name).build());
+    String uploadId = result.uploadId();
 
     int partNumber = 1;
     long total = 0;
     int n = buffer.length;
-    List<UploadPartResult> partResults = new ArrayList<>();
+    List<UploadPartResponse> partResults = new ArrayList<>();
     do {
       // TODO: partNumber cannot be bigger than 10000!
       // TODO: checksums?
-      UploadPartResult uploadPartResult = s3client.uploadPart(new UploadPartRequest()
-              .withBucketName(bucket)
-              .withKey(name)
-              .withPartSize(n)
-              .withFileOffset(total)
-              .withPartNumber(partNumber)
-              .withInputStream(new ByteArrayInputStream(buffer, 0, n))
-              .withUploadId(uploadId));
+      UploadPartResponse uploadPartResult = s3client.uploadPart(
+              UploadPartRequest.builder()
+                      .bucket(bucket)
+                      .key(name)
+                      .partNumber(partNumber)
+                      .uploadId(uploadId)
+                      .build(),
+              RequestBody.fromByteBuffer(ByteBuffer.wrap(buffer, 0, n)));
       ++partNumber;
       total += n;
       partResults.add(uploadPartResult);
       n = Util.readChunk(stream, buffer);
     } while (n > 0);
 
-    s3client.completeMultipartUpload(new CompleteMultipartUploadRequest()
-            .withBucketName(bucket)
-            .withKey(name)
-            .withUploadId(uploadId)
-            .withPartETags(partResults));
+    s3client.completeMultipartUpload(CompleteMultipartUploadRequest.builder()
+            .bucket(bucket)
+            .key(name)
+            .uploadId(uploadId)
+            .build());
   }
 
   @Override
@@ -139,10 +155,14 @@ public class S3Directory implements EventuallyConsistentDirectory {
       byte[] buffer = new byte[AWSTools.BYTES_PER_MULTIPART_UPLOAD_CHUNK];
       int n = Util.readChunk(stream, buffer);
       if (n < buffer.length) {
-        ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentLength(n);
-        metadata.setContentType("application/octet-stream");
-        s3client.putObject(bucket, name, new ByteArrayInputStream(buffer, 0, n), metadata);
+        s3client.putObject(
+                PutObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(name)
+//                        .contentLength((long)n)
+//                        .contentType("application/octet-stream")
+                        .build(),
+                RequestBody.fromByteBuffer(ByteBuffer.wrap(buffer, 0, n)));
       } else {
         doMultipartUpload(name, buffer, stream);
       }
@@ -154,14 +174,13 @@ public class S3Directory implements EventuallyConsistentDirectory {
   @Override
   public InputStream open(String name) throws IOException {
     try {
-      return s3client.getObject(bucket, name).getObjectContent();
-    } catch (AmazonServiceException e) {
-      // "AmazonServiceException" indicates an error response from Amazon.
-      // The status code 404 means "not found".
-      if (e.getStatusCode() == 404) {
-        throw new NoSuchFileException(name);
-      }
-      throw new IOException(e);
+      return s3client.getObject(
+              GetObjectRequest.builder()
+                      .bucket(bucket)
+                      .key(name)
+                      .build());
+    } catch (NoSuchKeyException e) {
+      throw new NoSuchFileException(name);
     } catch (SdkClientException e) {
       // "SdkClientException" indicates any other kind of error, including:
       //   - malformed request
@@ -174,7 +193,11 @@ public class S3Directory implements EventuallyConsistentDirectory {
   @Override
   public void delete(String name) throws IOException {
     try {
-      s3client.deleteObject(bucket, name);
+      s3client.deleteObject(
+              DeleteObjectRequest.builder()
+                      .bucket(bucket)
+                      .key(name)
+                      .build());
     } catch (SdkClientException e) {
       throw new IOException(e);
     }

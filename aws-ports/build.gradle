@@ -1,0 +1,20 @@
+plugins {
+    id "java"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+////////////////////////// External deps
+repositories {
+    mavenCentral()
+}
+
+def aws_sdk_version = "2.17.271"
+
+dependencies {
+    implementation "software.amazon.awssdk:utils:${aws_sdk_version}"
+}

@@ -7,7 +7,7 @@ public class AWS {
 
   @Test
   public void testCredentials() {
-    AWSTools.credentialsProvider().getCredentials();
+    AWSTools.credentialsProvider().resolveCredentials();
   }
 
 }

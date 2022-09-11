@@ -19,7 +19,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -99,13 +98,17 @@ public abstract class Util {
     }
     char[] c1 = cons.readPassword("%s: ", prompt);
     if (c1 == null) return null;
-    char[] c2 = cons.readPassword("Confirm: ");
-    if (c2 == null) return null;
-    if (!Arrays.equals(c1, c2)) {
-      System.err.println("passwords do not match");
-      return null;
-    }
     return new String(c1);
+  }
+
+  public static boolean confirmPassword(String password) {
+    String password2 = readPassword("Confirm password");
+    if (password.equals(password2)) {
+      return true;
+    } else {
+      System.err.println("passwords do not match");
+      return false;
+    }
   }
 
   public static long divideAndRoundUp(long numerator, long denominator) {
