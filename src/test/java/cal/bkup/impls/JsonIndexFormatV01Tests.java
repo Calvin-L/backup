@@ -4,7 +4,6 @@ import cal.bkup.Util;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
-import cal.prim.fs.SymLink;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -90,7 +89,7 @@ public class JsonIndexFormatV01Tests {
             Paths.get("/Users/loncaric/src/backup/config.json"))));
 
     Assert.assertEquals(index.getInfo(system, Paths.get("/Users/loncaric/src/backup/config.json")), Collections.singletonList(
-            new BackupIndex.Revision(0, new SymLink(Paths.get("/Users/loncaric/src/backup/config.json"), Paths.get("/Users/loncaric/.backup-config.json")))
+            new BackupIndex.SoftLinkRev(0, Paths.get("/Users/loncaric/.backup-config.json"))
     ));
   }
 
@@ -162,7 +161,7 @@ public class JsonIndexFormatV01Tests {
             Paths.get("/Users/loncaric/src/backup/config.json"))));
 
     Assert.assertEquals(index.getInfo(system, Paths.get("/Users/loncaric/src/backup/config.json")), Collections.singletonList(
-            new BackupIndex.Revision(0, new SymLink(Paths.get("/Users/loncaric/src/backup/config.json"), Paths.get("/Users/loncaric/.backup-config.json")))
+            new BackupIndex.SoftLinkRev(0, Paths.get("/Users/loncaric/.backup-config.json"))
     ));
 
   }

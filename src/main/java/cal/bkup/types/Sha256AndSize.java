@@ -1,23 +1,29 @@
 package cal.bkup.types;
 
-import lombok.NonNull;
-import lombok.Value;
-
+import java.util.Arrays;
 import java.util.Objects;
 
-@Value
-public class Sha256AndSize {
+public record Sha256AndSize(byte[] sha256, long size) {
 
-  @NonNull byte[] sha256;
-  long size;
-
-  public Sha256AndSize(byte[] sha256, long size) {
+  public Sha256AndSize {
     Objects.requireNonNull(sha256);
     if (sha256.length != 32) {
       throw new IllegalArgumentException("array is the wrong length to be a sha256 checksum");
     }
-    this.sha256 = sha256;
-    this.size = size;
+  }
+
+  // NOTE: Arrays use reference equality, so we need our own equals() and hashCode()
+
+  @Override
+  public boolean equals(Object obj) {
+    return obj instanceof Sha256AndSize other &&
+            size == other.size &&
+            Arrays.equals(sha256, other.sha256);
+  }
+
+  @Override
+  public int hashCode() {
+    return Arrays.hashCode(sha256) * 31 + Long.hashCode(size);
   }
 
 }

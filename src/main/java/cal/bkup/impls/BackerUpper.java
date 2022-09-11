@@ -11,6 +11,7 @@ import cal.prim.NoValue;
 import cal.prim.Pair;
 import cal.prim.PreconditionFailed;
 import cal.prim.Price;
+import cal.prim.fs.Filesystem;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.Link;
 import cal.prim.fs.RegularFile;
@@ -24,7 +25,6 @@ import cal.prim.transforms.Encryption;
 import cal.prim.transforms.StatisticsCollectingInputStream;
 import cal.prim.transforms.TrimmedInputStream;
 import com.google.common.annotations.VisibleForTesting;
-import lombok.Value;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -90,7 +90,7 @@ public class BackerUpper {
     long estimatedBytesUploaded();
     Price estimatedExecutionCost();
     Price estimatedMonthlyCost();
-    void execute() throws IOException, BackupIndex.MergeConflict;
+    void execute(Filesystem fs) throws IOException, BackupIndex.MergeConflict;
   }
 
   public BackupPlan planBackup(
@@ -112,13 +112,13 @@ public class BackerUpper {
     Set<Path> inThisBackup = new HashSet<>();
 
     for (RegularFile f : files) {
-      inThisBackup.add(f.getPath());
-      BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.getPath());
-      Instant lastModTime = (latest != null && latest.type == BackupIndex.FileType.REGULAR_FILE) ? latest.modTime : null;
-      Instant localModTime = f.getModTime().truncatedTo(ChronoUnit.MILLIS);
+      inThisBackup.add(f.path());
+      BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, f.path());
+      Instant lastModTime = (latest instanceof BackupIndex.RegularFileRev latestFile) ? latestFile.modTime() : null;
+      Instant localModTime = f.modTime().truncatedTo(ChronoUnit.MILLIS);
       if (!Objects.equals(lastModTime, localModTime)) {
-        System.out.println(" --> " + f.getPath() + " [" + (lastModTime != null ? ("updated: " + lastModTime + " --> ") : "new: ") + localModTime + ']');
-        long size = f.getSizeInBytes();
+        System.out.println(" --> " + f.path() + " [" + (lastModTime != null ? ("updated: " + lastModTime + " --> ") : "new: ") + localModTime + ']');
+        long size = f.sizeInBytes();
         bytesUploaded += size;
         totalUploadCost = totalUploadCost.plus(blobStorageCosts.costToUploadBlob(size));
         monthlyStorageCost = monthlyStorageCost.plus(blobStorageCosts.monthlyStorageCostForBlob(size));
@@ -127,18 +127,18 @@ public class BackerUpper {
     }
 
     for (Link l : symlinks) {
-      inThisBackup.add(l.getSource());
+      inThisBackup.add(l.source());
     }
 
     for (Link l : hardlinks) {
-      inThisBackup.add(l.getSource());
+      inThisBackup.add(l.source());
     }
 
     for (Path p : index.knownPaths(whatSystemIsThis)) {
       if (!inThisBackup.contains(p)) {
         var latest = index.mostRecentRevision(whatSystemIsThis, p);
         assert latest != null;
-        if (latest.type != BackupIndex.FileType.TOMBSTONE) {
+        if (!(latest instanceof BackupIndex.TombstoneRev)) {
           System.out.println(" --> " + p + " [deleted]");
           toForget.add(p);
         }
@@ -166,15 +166,15 @@ public class BackerUpper {
       }
 
       @Override
-      public void execute() throws IOException, BackupIndex.MergeConflict {
-        backup(whatSystemIsThis, passwordForIndex, newPasswordForIndex, filteredFiles, symlinks, hardlinks, toForget);
+      public void execute(Filesystem fs) throws IOException, BackupIndex.MergeConflict {
+        backup(whatSystemIsThis, passwordForIndex, newPasswordForIndex, fs, filteredFiles, symlinks, hardlinks, toForget);
       }
     };
 
   }
 
   @VisibleForTesting
-  public void backup(SystemId whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
+  public void backup(SystemId whatSystemIsThis, String passwordForIndex, String newPasswordForIndex, Filesystem fs, Collection<RegularFile> files, Collection<SymLink> symlinks, Collection<HardLink> hardlinks, Collection<Path> toForget) throws IOException, BackupIndex.MergeConflict {
 
     List<String> warnings = new ArrayList<>();
     final AtomicBoolean keepRunning = new AtomicBoolean(true);
@@ -198,17 +198,17 @@ public class BackerUpper {
             return;
           }
 
-          var batch = nextBatch(remainingFiles, whatSystemIsThis, backupId, index, progress, warnings);
-          var uploadResult = uploadBatch(batch, progress);
+          var batch = nextBatch(fs, remainingFiles, whatSystemIsThis, backupId, index, progress, warnings);
+          var uploadResult = uploadBatch(fs, batch, progress);
           for (var entry : uploadResult.entrySet()) {
             var f = entry.getKey();
-            var summary = entry.getValue().getFst();
-            var report = entry.getValue().getSnd();
+            var summary = entry.getValue().fst();
+            var report = entry.getValue().snd();
             var actualReport = index.addOrCanonicalizeBackedUpBlob(summary, report);
             if (!actualReport.equals(report)) {
-              warnings.add("Duplicate file detected in batch " + report.getIdAtTarget() + " (" + report.getSizeAtTarget() + " junk bytes were uploaded)");
+              warnings.add("Duplicate file detected in batch " + report.idAtTarget() + " (" + report.sizeAtTarget() + " junk bytes were uploaded)");
             }
-            index.appendRevision(whatSystemIsThis, backupId, f.getPath(), f.getModTime(), summary);
+            index.appendRevision(whatSystemIsThis, backupId, f.path(), f.modTime(), summary);
           }
 
           var now = durationClock.sample();
@@ -220,24 +220,24 @@ public class BackerUpper {
         }
 
         for (var link : symlinks) {
-          ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.getSource() + " --> " + link.getDestination());
-          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
-          if (latest != null && latest.type == BackupIndex.FileType.SOFT_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
+          ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.source() + " --> " + link.destination());
+          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.source());
+          if (latest instanceof BackupIndex.SoftLinkRev linkRev && Objects.equals(linkRev.target(), link.destination())) {
             progress.finishTask(task);
             continue;
           }
-          index.appendRevision(whatSystemIsThis, backupId, link.getSource(), link);
+          index.appendRevision(whatSystemIsThis, backupId, link.source(), link);
           progress.finishTask(task);
         }
 
         for (var link : hardlinks) {
-          ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.getSource() + " --> " + link.getDestination());
-          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.getSource());
-          if (latest != null && latest.type == BackupIndex.FileType.HARD_LINK && Objects.equals(latest.linkTarget, link.getDestination())) {
+          ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.source() + " --> " + link.destination());
+          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.source());
+          if (latest instanceof BackupIndex.HardLinkRev linkRev && Objects.equals(linkRev.target(), link.destination())) {
             progress.finishTask(task);
             continue;
           }
-          index.appendRevision(whatSystemIsThis, backupId, link.getSource(), link);
+          index.appendRevision(whatSystemIsThis, backupId, link.source(), link);
           progress.finishTask(task);
         }
 
@@ -271,7 +271,7 @@ public class BackerUpper {
    * Files may be skipped if they have disappeared or if they are already present
    * in the <code>index</code>.
    */
-  private Collection<Pair<RegularFile, Sha256AndSize>> nextBatch(Collection<RegularFile> files, SystemId systemId, BackupIndex.BackupMetadata backupId, BackupIndex index, ProgressDisplay display, List<String> warnings) throws IOException {
+  private Collection<Pair<RegularFile, Sha256AndSize>> nextBatch(Filesystem fs, Collection<RegularFile> files, SystemId systemId, BackupIndex.BackupMetadata backupId, BackupIndex index, ProgressDisplay display, List<String> warnings) throws IOException {
     final long PREFERRED_BATCH_SIZE_IN_BYTES = 10_000_000_000L; // 10 GB
 
     long total = 0;
@@ -280,12 +280,12 @@ public class BackerUpper {
     Iterator<RegularFile> it = files.iterator();
     while (it.hasNext()) {
       var f = it.next();
-      if (result.isEmpty() || total + f.getSizeInBytes() < PREFERRED_BATCH_SIZE_IN_BYTES) {
+      if (result.isEmpty() || total + f.sizeInBytes() < PREFERRED_BATCH_SIZE_IN_BYTES) {
         Sha256AndSize summary = null;
         try {
-          summary = summarize(f, display);
+          summary = summarize(fs, f, display);
         } catch (NoSuchFileException exn) {
-          warnings.add("File " + f.getPath() + " disappeared between planning and checksum");
+          warnings.add("File " + f.path() + " disappeared between planning and checksum");
         }
         if (summary != null) {
           boolean isNewToThisBatch = seen.add(summary);
@@ -294,14 +294,14 @@ public class BackerUpper {
             continue;
           }
           if (index.lookupBlob(summary) == null) {
-            if (f.getSizeInBytes() != summary.getSize()) {
-              warnings.add("File " + f.getPath() + " changed size between planning and checksum");
+            if (f.sizeInBytes() != summary.size()) {
+              warnings.add("File " + f.path() + " changed size between planning and checksum");
             }
             result.add(new Pair<>(f, summary));
-            total += summary.getSize();
+            total += summary.size();
           } else {
-            index.appendRevision(systemId, backupId, f.getPath(), f.getModTime(), summary);
-            display.skipTask("Upload " + f.getPath(), "data is already present");
+            index.appendRevision(systemId, backupId, f.path(), f.modTime(), summary);
+            display.skipTask("Upload " + f.path(), "data is already present");
           }
         }
         it.remove();
@@ -311,11 +311,11 @@ public class BackerUpper {
     return result;
   }
 
-  private Sha256AndSize summarize(RegularFile f, ProgressDisplay display) throws IOException {
-    ProgressDisplay.Task checksumTask = display.startTask("checksum " + f.getPath());
-    try (InputStream in = Util.buffered(f.open())) {
+  private Sha256AndSize summarize(Filesystem fs, RegularFile f, ProgressDisplay display) throws IOException {
+    ProgressDisplay.Task checksumTask = display.startTask("checksum " + f.path());
+    try (InputStream in = Util.buffered(fs.openRegularFileForReading(f.path()))) {
       return Util.summarize(in, stream ->
-              display.reportProgress(checksumTask, stream.getBytesRead(), f.getSizeInBytes()));
+              display.reportProgress(checksumTask, stream.getBytesRead(), f.sizeInBytes()));
     } finally {
       display.finishTask(checksumTask);
     }
@@ -359,10 +359,10 @@ public class BackerUpper {
     if (report == null) {
       throw new NoSuchElementException();
     }
-    InputStream s = Util.buffered(blobStore.open(report.getIdAtTarget()));
-    s.skipNBytes(report.getOffsetAtAtTarget());
-    s = new TrimmedInputStream(s, report.getSizeAtTarget());
-    return transformer.followedBy(new Encryption(report.getKey())).unApply(s);
+    InputStream s = Util.buffered(blobStore.open(report.idAtTarget()));
+    s.skipNBytes(report.offsetAtTarget());
+    s = new TrimmedInputStream(s, report.sizeAtTarget());
+    return transformer.followedBy(new Encryption(report.key())).unApply(s);
   }
 
   public interface CleanupPlan {
@@ -393,23 +393,21 @@ public class BackerUpper {
     // even though /b@R2 refers to it, because in R3 /b actually refers
     // to /a@R3, which will not be forgotten.
 
-    return revision.backupNumber < earliestBackupToKeep
-            && index.getInfo(system, path).stream().anyMatch(r -> revision.backupNumber < r.backupNumber && r.backupNumber <= earliestBackupToKeep)
+    return revision.backupNumber() < earliestBackupToKeep
+            && index.getInfo(system, path).stream().anyMatch(r -> revision.backupNumber() < r.backupNumber() && r.backupNumber() <= earliestBackupToKeep)
 //            && index.findHardLinksPointingTo(system, path, revision.backupNumber).stream().allMatch(hardlink -> isSafeToForget(index, system, path, hardlink, earliestBackupToKeep))
             ;
   }
 
-  @Value
-  private static class BackupID {
-    SystemId system;
-    BackupIndex.BackupMetadata info;
+  private record BackupID(
+    SystemId system,
+    BackupIndex.BackupMetadata info) {
   }
 
-  @Value
-  private static class RevisionID {
-    SystemId system;
-    Path path;
-    BackupIndex.Revision revision;
+  private record RevisionID(
+    SystemId system,
+    Path path,
+    BackupIndex.Revision revision) {
   }
 
   public CleanupPlan planCleanup(String password, Duration retentionTime, StorageCostModel blobStorageCosts) throws IOException {
@@ -438,10 +436,10 @@ public class BackerUpper {
     for (SystemId system : index.knownSystems()) {
       var backups = index.knownBackups(system);
       if (backups.size() > 0) {
-        long earliestBackupToKeep = backups.stream().max(Comparator.comparingLong(BackupIndex.BackupMetadata::getBackupNumber)).get().getBackupNumber();
+        long earliestBackupToKeep = backups.stream().max(Comparator.comparingLong(BackupIndex.BackupMetadata::backupNumber)).get().backupNumber();
         for (BackupIndex.BackupMetadata backupInfo : backups) {
-          if (backupInfo.getStartTime().compareTo(cutoff) >= 0) {
-            earliestBackupToKeep = Math.min(earliestBackupToKeep, backupInfo.getBackupNumber());
+          if (backupInfo.startTime().compareTo(cutoff) >= 0) {
+            earliestBackupToKeep = Math.min(earliestBackupToKeep, backupInfo.backupNumber());
           }
         }
 
@@ -455,7 +453,7 @@ public class BackerUpper {
             var r = new RevisionID(system, path, revision);
             if (revisionsToForget.contains(r)) {
               continue;
-            } else if (revision.type == BackupIndex.FileType.TOMBSTONE) {
+            } else if (revision instanceof BackupIndex.TombstoneRev) {
               revisionsToForget.add(new RevisionID(system, path, revision));
             } else {
               break;
@@ -467,7 +465,7 @@ public class BackerUpper {
       for (BackupIndex.BackupMetadata info : backups) {
         if (index.knownPaths(system).stream()
                 .allMatch(p -> index.getInfo(system, p).stream()
-                        .filter(r -> r.backupNumber == info.getBackupNumber())
+                        .filter(r -> r.backupNumber() == info.backupNumber())
                         .allMatch(r -> revisionsToForget.contains(new RevisionID(system, p, r))))) {
           backupsToForget.add(new BackupID(system, info));
         }
@@ -484,8 +482,8 @@ public class BackerUpper {
     for (SystemId system : index.knownSystems()) {
       for (Path path : Util.sorted(index.knownPaths(system))) {
         for (BackupIndex.Revision revision : index.getInfo(system, path)) {
-          if (revision.summary != null && !revisionsToForget.contains(new RevisionID(system, path, revision))) {
-            referencedBlobs.add(revision.summary);
+          if (revision instanceof BackupIndex.RegularFileRev f && !revisionsToForget.contains(new RevisionID(system, path, revision))) {
+            referencedBlobs.add(f.summary());
           }
         }
       }
@@ -498,7 +496,7 @@ public class BackerUpper {
     Set<String> blobsExistingAtEnd = referencedBlobs.stream()
             .map(index::lookupBlob)
             .map(Objects::requireNonNull)
-            .map(BackupReport::getIdAtTarget)
+            .map(BackupReport::idAtTarget)
             .collect(Collectors.toSet());
 
     // "Sweep" -- anything that isn't referenced can be deleted
@@ -509,7 +507,7 @@ public class BackerUpper {
     Map<String, BackupReport> backedUpBlobsByIDAtTarget = index.listBlobs()
             .map(index::lookupBlob)
             .map(Objects::requireNonNull)
-            .collect(Collectors.toMap(BackupReport::getIdAtTarget, Function.identity()));
+            .collect(Collectors.toMap(BackupReport::idAtTarget, Function.identity()));
 
     return new CleanupPlan() {
       @Override
@@ -527,7 +525,7 @@ public class BackerUpper {
         return blobsToDelete.stream()
                 .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
-                .mapToLong(BackupReport::getSizeAtTarget)
+                .mapToLong(BackupReport::sizeAtTarget)
                 .sum();
       }
 
@@ -536,7 +534,7 @@ public class BackerUpper {
         return blobsToDelete.stream()
                 .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
-                .map(report -> blobStorageCosts.costToDeleteBlob(report.getSizeAtTarget(), Duration.ZERO))
+                .map(report -> blobStorageCosts.costToDeleteBlob(report.sizeAtTarget(), Duration.ZERO))
                 .reduce(Price.ZERO, Price::plus);
       }
 
@@ -545,7 +543,7 @@ public class BackerUpper {
         return blobsToDelete.stream()
                 .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
-                .mapToLong(BackupReport::getSizeAtTarget)
+                .mapToLong(BackupReport::sizeAtTarget)
                 .mapToObj(blobStorageCosts::monthlyStorageCostForBlob)
                 .reduce(Price.ZERO, Price::plus)
                 .negate();
@@ -588,7 +586,7 @@ public class BackerUpper {
   // -------------------------------------------------------------------------
   // Helpers for doing backups
 
-  private Map<RegularFile, Pair<Sha256AndSize, BackupReport>> uploadBatch(Collection<Pair<RegularFile, Sha256AndSize>> files, ProgressDisplay display) throws IOException {
+  private Map<RegularFile, Pair<Sha256AndSize, BackupReport>> uploadBatch(Filesystem fs, Collection<Pair<RegularFile, Sha256AndSize>> files, ProgressDisplay display) throws IOException {
     if (files.isEmpty()) {
       return Collections.emptyMap();
     }
@@ -610,7 +608,7 @@ public class BackerUpper {
       ProgressDisplay.Task task;
 
       final Consumer<StatisticsCollectingInputStream> reportProgress = s ->
-              display.reportProgress(task, s.getBytesRead(), currentFile.getSizeInBytes());
+              display.reportProgress(task, s.getBytesRead(), currentFile.sizeInBytes());
 
       {
         openNext();
@@ -621,7 +619,7 @@ public class BackerUpper {
           try {
             current.close();
             assert stats.isClosed();
-            var path = currentFile.getPath();
+            var path = currentFile.path();
             offsetsAtTarget.put(path, startOffsetOfCurrentFile);
             sizesAtTarget.put(path, bytesSent - startOffsetOfCurrentFile);
             actualSummaries.put(path, new Sha256AndSize(
@@ -637,10 +635,10 @@ public class BackerUpper {
 
       private void openNext() throws IOException {
         if (remaining.hasNext()) {
-          currentFile = remaining.next().getFst();
-          task = display.startTask("Upload " + currentFile.getPath());
+          currentFile = remaining.next().fst();
+          task = display.startTask("Upload " + currentFile.path());
           startOffsetOfCurrentFile = bytesSent;
-          stats = new StatisticsCollectingInputStream(Util.buffered(currentFile.open()), reportProgress);
+          stats = new StatisticsCollectingInputStream(Util.buffered(fs.openRegularFileForReading(currentFile.path())), reportProgress);
           current = transformer.followedBy(new Encryption(key)).apply(stats);
         } else {
           current = null;
@@ -674,19 +672,19 @@ public class BackerUpper {
 
     // Sanity check: sum of sizes should equal total upload size
     long expectedSize = sizesAtTarget.values().stream().mapToLong(l -> l).sum();
-    long actualSize = result.getBytesStored();
+    long actualSize = result.bytesStored();
     if (expectedSize != actualSize) {
       throw new RuntimeException("Batch upload seems to have been corrupted: " + actualSize + " bytes were uploaded, but I expected " + expectedSize);
     }
 
     var finalReports = new HashMap<RegularFile, Pair<Sha256AndSize, BackupReport>>();
     for (var pair : files) {
-      var f = pair.getFst();
-      var path = f.getPath();
+      var f = pair.fst();
+      var path = f.path();
       finalReports.put(f, new Pair<>(
               actualSummaries.get(path),
               new BackupReport(
-                      result.getIdentifier(),
+                      result.identifier(),
                       offsetsAtTarget.get(path),
                       sizesAtTarget.get(path),
                       key)));
@@ -722,8 +720,8 @@ public class BackerUpper {
   private void loadIndexIfMissing(String password) throws IOException {
     if (index == null) {
       var tagAndIndex = readLatestFromIndexStore(password);
-      tagForLastIndexLoad = tagAndIndex.getFst();
-      index = tagAndIndex.getSnd();
+      tagForLastIndexLoad = tagAndIndex.fst();
+      index = tagAndIndex.snd();
     }
   }
 
@@ -773,12 +771,12 @@ public class BackerUpper {
         System.out.println("checkpoint while this process was running.  This process will");
         System.out.println("reload the checkpoint, merge its progress, and try again...");
         var latest = readLatestFromIndexStore(currentPassword);
-        tagForLastIndexLoad = latest.getFst();
+        tagForLastIndexLoad = latest.fst();
         try {
-          index = index.merge(latest.getSnd());
+          index = index.merge(latest.snd());
         } catch (BackupIndex.MergeConflict exn) {
           // merge failed; invalidate cached data
-          index = latest.getSnd();
+          index = latest.snd();
           throw exn;
         }
       } else {

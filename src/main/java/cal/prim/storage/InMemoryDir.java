@@ -41,7 +41,7 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
     List<String> legalEntries;
     synchronized (this) {
       legalEntries = pendingWrites.stream()
-              .map(Pair::getFst)
+              .map(Pair::fst)
               .distinct()
               .filter(name -> random.nextBoolean())
               .collect(Collectors.toList());
@@ -64,8 +64,8 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
     List<byte[]> legalEntries;
     synchronized (this) {
       legalEntries = pendingWrites.stream()
-              .filter(entry -> entry.getFst().equals(name))
-              .map(Pair::getSnd)
+              .filter(entry -> entry.fst().equals(name))
+              .map(Pair::snd)
               .collect(Collectors.toList());
     }
     int index = random.nextInt(legalEntries.size() + 1);
@@ -98,7 +98,7 @@ public class InMemoryDir implements EventuallyConsistentDirectory {
     ConsistentInMemoryDir result = new ConsistentInMemoryDir();
     for (var entry : pendingWrites) {
       try {
-        result.createOrReplace(entry.getFst(), new ByteArrayInputStream(entry.getSnd()));
+        result.createOrReplace(entry.fst(), new ByteArrayInputStream(entry.snd()));
       } catch (IOException e) {
         throw new IllegalStateException();
       }

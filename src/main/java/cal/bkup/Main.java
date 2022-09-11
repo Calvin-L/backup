@@ -20,7 +20,9 @@ import cal.prim.Price;
 import cal.prim.concurrency.DynamoDBStringRegister;
 import cal.prim.concurrency.SQLiteStringRegister;
 import cal.prim.concurrency.StringRegister;
+import cal.prim.fs.Filesystem;
 import cal.prim.fs.HardLink;
+import cal.prim.fs.PhysicalFilesystem;
 import cal.prim.fs.RegularFile;
 import cal.prim.fs.SymLink;
 import cal.prim.storage.BlobStoreOnDirectory;
@@ -113,7 +115,7 @@ public class Main {
       }
       long seconds = remaining.toSeconds();
       long secondsPerMonth = 2592000;
-      return new Price(monthlyStorageCostForBlob(numBytes).getValueInCents().divide(secondsPerMonth).multiply(seconds));
+      return new Price(monthlyStorageCostForBlob(numBytes).valueInCents().divide(secondsPerMonth).multiply(seconds));
     }
 
     @Override
@@ -272,16 +274,17 @@ public class Main {
       List<SymLink> symlinks = new ArrayList<>();
       List<HardLink> hardlinks = new ArrayList<>();
       List<RegularFile> files = new ArrayList<>();
-      FileTools.forEachFile(config, symlinks::add, hardlinks::add, files::add);
+      Filesystem fs = new PhysicalFilesystem();
+      FileTools.forEachFile(fs, config, symlinks::add, hardlinks::add, files::add);
       System.out.println("Planning backup...");
-      BackerUpper.BackupPlan plan = backupper.planBackup(config.getSystemName(), password, newPassword, COST_MODEL, files, symlinks, hardlinks);
+      BackerUpper.BackupPlan plan = backupper.planBackup(config.systemName(), password, newPassword, COST_MODEL, files, symlinks, hardlinks);
       System.out.println("Estimated costs:");
       System.out.println("  uploaded bytes:      " + Util.formatSize(plan.estimatedBytesUploaded()));
       System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
       System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
       if (!dryRun && confirm("Proceed?")) {
         try {
-          plan.execute();
+          plan.execute(fs);
         } catch (BackupIndex.MergeConflict mergeConflict) {
           System.err.println("Another concurrent backup interfered with this one!");
           System.err.println("Error message: " + mergeConflict.getMessage());
@@ -293,7 +296,7 @@ public class Main {
 
     if (list) {
       backupper.list(newPassword).forEach(info -> {
-        System.out.println('[' + info.system().toString() + "] " + info.latestRevision().type + ": " + info.path());
+        System.out.println('[' + info.system().toString() + "] " + info.latestRevision() + ": " + info.path());
       });
     }
 
@@ -328,8 +331,9 @@ public class Main {
 
     if (numToCheck > 0) {
       List<Pair<Path, Sha256AndSize>> candidates = backupper.list(newPassword)
-              .filter(item -> item.system().equals(config.getSystemName()) && item.latestRevision().type == BackupIndex.FileType.REGULAR_FILE)
-              .map(item -> new Pair<>(item.path(), item.latestRevision().summary))
+              .filter(item -> item.system().equals(config.systemName()))
+              .filter(item -> item.latestRevision() instanceof BackupIndex.RegularFileRev)
+              .map(item -> new Pair<>(item.path(), ((BackupIndex.RegularFileRev) item.latestRevision()).summary()))
               .collect(Collectors.toList());
       Random random = new Random();
       Collections.shuffle(candidates, random);
@@ -338,14 +342,14 @@ public class Main {
       List<Sha256AndSize> remoteSummaries = new ArrayList<>();
       try (ProgressDisplay display = new ProgressDisplay(len)) {
         for (int i = 0; i < len; ++i) {
-          Path path = candidates.get(i).getFst();
+          Path path = candidates.get(i).fst();
           ProgressDisplay.Task t = display.startTask("fetch " + path);
           try (InputStream in = Util.buffered(Files.newInputStream(path))) {
             localSummaries.add(Util.summarize(in, s -> { }));
           }
-          Sha256AndSize thing = candidates.get(i).getSnd();
+          Sha256AndSize thing = candidates.get(i).snd();
           try (InputStream in = Util.buffered(backupper.restore(newPassword, thing))) {
-            remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.getSize())));
+            remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.size())));
           }
           display.finishTask(t);
         }
@@ -353,7 +357,7 @@ public class Main {
 
       boolean ok = true;
       for (int i = 0; i < len; ++i) {
-        System.out.print(candidates.get(i).getFst() + ": ");
+        System.out.print(candidates.get(i).fst() + ": ");
         if (localSummaries.get(i).equals(remoteSummaries.get(i))) {
           System.out.println("OK");
         } else {

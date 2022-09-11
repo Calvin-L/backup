@@ -9,12 +9,6 @@ import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import lombok.AccessLevel;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.ToString;
-import lombok.Value;
 
 import javax.annotation.Nullable;
 import java.math.BigInteger;
@@ -56,76 +50,25 @@ import java.util.stream.Stream;
  * atomic.  All query methods return immutable copies of their results, so their
  * answers will not be affected by the actions of other threads in the future.
  */
-@EqualsAndHashCode
 public class BackupIndex {
 
-  public enum FileType {
-    REGULAR_FILE,
-    HARD_LINK,
-    SOFT_LINK,
-    TOMBSTONE
+  public sealed interface Revision permits RegularFileRev, SoftLinkRev, HardLinkRev, TombstoneRev {
+    long backupNumber();
   }
 
-  @ToString
-  @EqualsAndHashCode
-  @AllArgsConstructor(access=AccessLevel.PRIVATE)
-  public static class Revision {
-    public final long backupNumber;
-    public final FileType type;
-
-    // type is REGULAR_FILE
-    /**
-     * The file's modification time, truncated to millisecond precision.
-     */
-    public final Instant modTime;
-    public final Sha256AndSize summary;
-
-    // type is SOFT_LINK or HARD_LINK
-    /**
-     * The link target.  The link target may have multiple revisions; if so,
-     * this entry refers to the revision at with the same {@link #backupNumber}
-     * as this one (or the latest revision that is not newer than this one).
-     */
-    public final Path linkTarget;
-
-    private Revision(long backupNumber) {
-      this.backupNumber = backupNumber;
-      this.type = FileType.TOMBSTONE;
-      this.modTime = null;
-      this.summary = null;
-      this.linkTarget = null;
-    }
-
-    private Revision(long backupNumber, Instant modTime, Sha256AndSize summary) {
-      this.backupNumber = backupNumber;
-      this.type = FileType.REGULAR_FILE;
-      this.modTime = modTime;
-      this.summary = summary;
-      this.linkTarget = null;
-    }
-
-    public Revision(long backupNumber, SymLink link) {
-      this.backupNumber = backupNumber;
-      this.type = FileType.SOFT_LINK;
-      this.modTime = null;
-      this.summary = null;
-      this.linkTarget = link.getDestination();
-    }
-
-    public Revision(long backupNumber, HardLink link) {
-      this.backupNumber = backupNumber;
-      this.type = FileType.HARD_LINK;
-      this.modTime = null;
-      this.summary = null;
-      this.linkTarget = link.getDestination();
-    }
+  public record RegularFileRev(long backupNumber, Instant modTime, Sha256AndSize summary) implements Revision {
   }
 
-  @Value
-  public static class BackupMetadata {
-    @NonNull Instant startTime;
-    @Nullable Instant endTime;
-    long backupNumber;
+  public record SoftLinkRev(long backupNumber, Path target) implements Revision {
+  }
+
+  public record HardLinkRev(long backupNumber, Path target) implements Revision {
+  }
+
+  public record TombstoneRev(long backupNumber) implements Revision {
+  }
+
+  public record BackupMetadata(Instant startTime, @Nullable Instant endTime, long backupNumber) {
   }
 
   private final Map<SystemId, List<BackupMetadata>> backupHistory;
@@ -154,6 +97,19 @@ public class BackupIndex {
     this.files = data;
     this.blobs = blobs;
     this.cleanupGeneration = cleanupGeneration;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    BackupIndex that = (BackupIndex) o;
+    return backupHistory.equals(that.backupHistory) && files.equals(that.files) && blobs.equals(that.blobs) && cleanupGeneration.equals(that.cleanupGeneration);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(backupHistory, files, blobs, cleanupGeneration);
   }
 
   public synchronized @Nullable BackupReport lookupBlob(Sha256AndSize content) {
@@ -186,7 +142,7 @@ public class BackupIndex {
 
   public synchronized BackupMetadata findBackup(SystemId system, long backupNumber) {
     for (var backup : backupHistory.getOrDefault(system, Collections.emptyList())) {
-      if (backup.getBackupNumber() == backupNumber) {
+      if (backup.backupNumber() == backupNumber) {
         return backup;
       }
     }
@@ -212,22 +168,19 @@ public class BackupIndex {
     return revisions != null ? new ArrayList<>(revisions) : Collections.emptyList();
   }
 
-  public synchronized Revision resolveHardLinkTarget(SystemId system, Revision hardLink) {
-    if (hardLink.type != FileType.HARD_LINK) {
-      throw new IllegalArgumentException();
-    }
-    return getInfo(system, hardLink.linkTarget).stream()
-            .filter(possibleTarget -> possibleTarget.backupNumber <= hardLink.backupNumber)
-            .max(Comparator.comparingLong(rr -> rr.backupNumber))
-            .get();
+  public synchronized Revision resolveHardLinkTarget(SystemId system, HardLinkRev hardLink) {
+    return getInfo(system, hardLink.target()).stream()
+            .filter(possibleTarget -> possibleTarget.backupNumber() <= hardLink.backupNumber())
+            .max(Comparator.comparingLong(Revision::backupNumber))
+            .orElseThrow(() -> new IllegalStateException("Hard link " + hardLink + " has no target"));
   }
 
-  public synchronized List<Revision> findHardLinksPointingTo(SystemId system, Path path, long revisionNumber) {
-    List<Revision> result = new ArrayList<>();
+  public synchronized List<HardLinkRev> findHardLinksPointingTo(SystemId system, Path path, long revisionNumber) {
+    List<HardLinkRev> result = new ArrayList<>();
     for (Path p : knownPaths(system)) {
       for (Revision r : getInfo(system, p)) {
-        if (r.type == FileType.HARD_LINK && r.linkTarget == path && resolveHardLinkTarget(system, r).backupNumber == revisionNumber) {
-          result.add(r);
+        if (r instanceof HardLinkRev l && l.target() == path && resolveHardLinkTarget(system, l).backupNumber() == revisionNumber) {
+          result.add(l);
         }
       }
     }
@@ -247,7 +200,7 @@ public class BackupIndex {
   }
 
   public synchronized void forgetRevision(SystemId system, Path path, Revision revision) {
-    if (revision == mostRecentRevision(system, path) && revision.type != FileType.TOMBSTONE) {
+    if (revision == mostRecentRevision(system, path) && !(revision instanceof TombstoneRev)) {
       throw new IllegalArgumentException("Can't forget most recent revision!");
     }
     Map<Path, List<Revision>> info = files.get(system);
@@ -272,7 +225,7 @@ public class BackupIndex {
   public synchronized void forgetBackup(SystemId system, BackupMetadata info) {
     for (Path p : knownPaths(system)) {
       for (Revision r : getInfo(system, p)) {
-        if (r.backupNumber == info.backupNumber) {
+        if (r.backupNumber() == info.backupNumber) {
           throw new IllegalArgumentException("Can't forget backup while a revision exists");
         }
       }
@@ -301,7 +254,7 @@ public class BackupIndex {
     BackupMetadata result =
             history.isEmpty()
                     ? new BackupMetadata(now, null, 0)
-                    : new BackupMetadata(now, null, lastEntry(history).getBackupNumber() + 1);
+                    : new BackupMetadata(now, null, lastEntry(history).backupNumber() + 1);
     history.add(result);
     return result;
   }
@@ -314,14 +267,14 @@ public class BackupIndex {
     }
     for (int i = 0; i < history.size(); ++i) {
       BackupMetadata old = history.get(i);
-      if (old.getBackupNumber() == info.getBackupNumber()) {
-        if (old.getEndTime() != null) {
+      if (old.backupNumber() == info.backupNumber()) {
+        if (old.endTime() != null) {
           throw new IllegalStateException("The backup " + info + " was already finished");
         }
         history.set(i, new BackupMetadata(
-                old.getStartTime(),
+                old.startTime(),
                 now,
-                old.getBackupNumber()));
+                old.backupNumber()));
         return;
       }
     }
@@ -348,19 +301,19 @@ public class BackupIndex {
       throw new IllegalArgumentException("Refusing to add backed up file that references nonexistent blob " + contentSummary);
     }
     modTime = modTime.truncatedTo(ChronoUnit.MILLIS);
-    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber(), modTime, contentSummary));
+    findOrAddRevisionList(system, path).add(new RegularFileRev(backup.backupNumber(), modTime, contentSummary));
   }
 
   public synchronized void appendRevision(SystemId system, BackupMetadata backup, Path path, HardLink link) {
-    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber(), link));
+    findOrAddRevisionList(system, path).add(new HardLinkRev(backup.backupNumber(), link.destination()));
   }
 
   public synchronized void appendRevision(SystemId system, BackupMetadata backup, Path path, SymLink link) {
-    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber(), link));
+    findOrAddRevisionList(system, path).add(new SoftLinkRev(backup.backupNumber(), link.destination()));
   }
 
   public synchronized void appendTombstone(SystemId system, BackupMetadata backup, Path path) {
-    findOrAddRevisionList(system, path).add(new Revision(backup.getBackupNumber()));
+    findOrAddRevisionList(system, path).add(new TombstoneRev(backup.backupNumber()));
   }
 
   public synchronized void setCleanupGeneration(BigInteger newCleanupGeneration) {
@@ -381,20 +334,17 @@ public class BackupIndex {
     for (var sys : knownSystems()) {
       for (var p : knownPaths(sys)) {
         for (var rev : getInfo(sys, p)) {
-          switch (rev.type) {
-            case REGULAR_FILE:
-              if (lookupBlob(rev.summary) == null) {
-                errors.add(sys + ":" + p + "@" + rev + " contents missing (" + rev.summary + ")");
-              }
-              break;
-            case HARD_LINK:
-              if (resolveHardLinkTarget(sys, rev) == null) {
-                errors.add(sys + ":" + p + "@" + rev + " hard link target missing (" + rev.linkTarget + ")");
-              }
-              break;
-            case SOFT_LINK:
-            case TOMBSTONE:
-              break;
+          // NOTE: can use pattern-matching switch for this in the future
+          if (rev instanceof RegularFileRev f) {
+            if (lookupBlob(f.summary()) == null) {
+              errors.add(sys + ":" + p + "@" + rev + " contents missing (" + f.summary() + ")");
+            }
+          } else if (rev instanceof HardLinkRev l) {
+            try {
+              resolveHardLinkTarget(sys, l);
+            } catch (IllegalStateException e) {
+              errors.add(sys + ":" + p + "@" + rev + " hard link target missing (" + l.target() + ")");
+            }
           }
         }
       }

@@ -3,6 +3,8 @@ package cal.prim.fs;
 import cal.prim.IOConsumer;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.util.Set;
@@ -21,5 +23,21 @@ public interface Filesystem {
    * @throws IOException
    */
   void scan(Path path, Set<PathMatcher> exclusions, IOConsumer<SymLink> onSymlink, IOConsumer<RegularFile> onFile) throws IOException;
+
+  /**
+   * Open the file for reading.
+   * Callers are responsible for closing the returned stream.
+   * The returned stream is not buffered.
+   *
+   * <p>This method opens the file when called, so it may return bytes for a
+   * different file than the one expected.  It may also fail if the file no
+   * longer exists.  Either situation can happen if another process modifies filesystem after
+   * the metadata snapshot happened but before this method was called.
+   *
+   * @return an open input stream
+   * @throws NoSuchFileException if the file is missing
+   * @throws IOException if something goes wrong when opening the file
+   */
+  InputStream openRegularFileForReading(Path path) throws NoSuchFileException, IOException;
 
 }

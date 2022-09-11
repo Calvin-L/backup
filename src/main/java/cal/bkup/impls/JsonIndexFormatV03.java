@@ -135,11 +135,11 @@ public class JsonIndexFormatV03 implements IndexFormat {
       JsonBlob blob = new JsonBlob();
       BackupReport report = index.lookupBlob(b);
       assert report != null;
-      blob.key = report.getKey();
-      blob.sha256 = Util.sha256toString(b.getSha256());
-      blob.size = b.getSize();
-      blob.backupId = report.getIdAtTarget();
-      blob.backupSize = report.getSizeAtTarget();
+      blob.key = report.key();
+      blob.sha256 = Util.sha256toString(b.sha256());
+      blob.size = b.size();
+      blob.backupId = report.idAtTarget();
+      blob.backupSize = report.sizeAtTarget();
       result.blobs.add(blob);
     });
 
@@ -160,31 +160,26 @@ public class JsonIndexFormatV03 implements IndexFormat {
 
   private JsonBackupInfo toJsonMeta(BackupIndex.BackupMetadata info) {
     JsonBackupInfo res = new JsonBackupInfo();
-    res.startTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(info.getStartTime().toEpochMilli());
-    res.endTimeAsMillisecondsSinceEpoch = info.getEndTime() == null ? null : BigInteger.valueOf(info.getEndTime().toEpochMilli());
-    res.backupNumber = info.getBackupNumber();
+    res.startTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(info.startTime().toEpochMilli());
+    res.endTimeAsMillisecondsSinceEpoch = info.endTime() == null ? null : BigInteger.valueOf(info.endTime().toEpochMilli());
+    res.backupNumber = info.backupNumber();
     return res;
   }
 
   private static JsonRevision toJsonRevision(BackupIndex.Revision r) {
     JsonRevision res = new JsonRevision();
-    res.backupNumber = r.backupNumber;
-    switch (r.type) {
-      case REGULAR_FILE:
-        res.modTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(r.modTime.toEpochMilli());
-        res.sha256 = Util.sha256toString(r.summary.getSha256());
-        res.size = r.summary.getSize();
-        break;
-      case SOFT_LINK:
-        res.symLinkDst = r.linkTarget.toString();
-        break;
-      case HARD_LINK:
-        res.hardLinkDst = r.linkTarget.toString();
-        break;
-      case TOMBSTONE:
-        break;
-      default:
-        throw new UnsupportedOperationException(r.type.toString());
+    res.backupNumber = r.backupNumber();
+    // NOTE: could use pattern-matching switch in future JDKs
+    if (r instanceof BackupIndex.RegularFileRev f) {
+      res.modTimeAsMillisecondsSinceEpoch = BigInteger.valueOf(f.modTime().toEpochMilli());
+      res.sha256 = Util.sha256toString(f.summary().sha256());
+      res.size = f.summary().size();
+    } else if (r instanceof BackupIndex.SoftLinkRev l) {
+      res.symLinkDst = l.target().toString();
+    } else if (r instanceof BackupIndex.HardLinkRev l) {
+      res.hardLinkDst = l.target().toString();
+    } else if (!(r instanceof BackupIndex.TombstoneRev)) {
+        throw new UnsupportedOperationException(r.toString());
     }
     return res;
   }

@@ -1,7 +1,5 @@
 package cal.prim.storage;
 
-import lombok.Value;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.NoSuchFileException;

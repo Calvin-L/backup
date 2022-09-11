@@ -7,12 +7,15 @@ import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SystemId;
+import cal.prim.IOConsumer;
 import cal.prim.NoValue;
 import cal.prim.Price;
 import cal.prim.concurrency.InMemoryStringRegister;
 import cal.prim.concurrency.StringRegister;
+import cal.prim.fs.Filesystem;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.RegularFile;
+import cal.prim.fs.SymLink;
 import cal.prim.storage.BlobStoreOnDirectory;
 import cal.prim.storage.ConsistentBlob;
 import cal.prim.storage.ConsistentBlobOnEventuallyConsistentDirectory;
@@ -23,7 +26,6 @@ import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.XZCompression;
-import lombok.NonNull;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -34,6 +36,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
@@ -41,6 +44,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -72,17 +76,11 @@ public class BackupTests {
     for (var sys : index.knownSystems()) {
       for (var p : index.knownPaths(sys)) {
         for (var rev : index.getInfo(sys, p)) {
-          switch (rev.type) {
-            case REGULAR_FILE:
-              Assert.assertNotNull(blobDir.open(index.lookupBlob(rev.summary).getIdAtTarget()));
-              Assert.assertNotNull(index.lookupBlob(rev.summary));
-              break;
-            case HARD_LINK:
-              Assert.assertNotNull(index.resolveHardLinkTarget(sys, rev));
-              break;
-            case SOFT_LINK:
-            case TOMBSTONE:
-              break;
+          if (rev instanceof BackupIndex.RegularFileRev f) {
+              Assert.assertNotNull(blobDir.open(index.lookupBlob(f.summary()).idAtTarget()));
+              Assert.assertNotNull(index.lookupBlob(f.summary()));
+          } else if (rev instanceof BackupIndex.HardLinkRev l) {
+              Assert.assertNotNull(index.resolveHardLinkTarget(sys, l));
           }
         }
       }
@@ -97,6 +95,13 @@ public class BackupTests {
         // NoSuchElementException --> the list() call did not see the object
         // NoSuchFileException --> the open() call did not see the object
       }
+    }
+  }
+
+  private static abstract class FakeFilesystem implements Filesystem {
+    @Override
+    public void scan(Path path, Set<PathMatcher> exclusions, IOConsumer<SymLink> onSymlink, IOConsumer<RegularFile> onFile) throws IOException {
+      throw new UnsupportedOperationException();
     }
   }
 
@@ -116,26 +121,26 @@ public class BackupTests {
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
 
-    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null);
+
+    Filesystem fs = new FakeFilesystem() {
       @Override
-      public InputStream open() {
+      public InputStream openRegularFileForReading(Path path) {
         byte[] data = new byte[1024];
-        for (int i = 0; i < data.length; ++i) {
-          data[i] = 33;
-        }
+        Arrays.fill(data, (byte) 33);
         return new ByteArrayInputStream(data);
       }
     };
 
     Collection<Path> toForget = Collections.emptyList();
-    backup.backup(system, password, password, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
+    backup.backup(system, password, password, fs, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
 
     Assert.assertEquals(blobDir.getPendingWrites().size(), 1);
 
     // blob compression should work
     try (InputStream s = readAny(blobDir)) {
       long size = Util.drain(s);
-      Assert.assertTrue(size < f.getSizeInBytes(), "allegedly-compressed size(" + size + ") is not less than original(" + f.getSizeInBytes() + ')');
+      Assert.assertTrue(size < f.sizeInBytes(), "allegedly-compressed size(" + size + ") is not less than original(" + f.sizeInBytes() + ')');
     }
 
     // blob encryption should work
@@ -143,7 +148,7 @@ public class BackupTests {
     try (InputStream s = readAny(blobDir)) {
       bytes = Util.read(s);
     }
-    Assert.assertNotEquals(bytes, Util.read(f.open()));
+    Assert.assertNotEquals(bytes, Util.read(fs.openRegularFileForReading(f.path())));
 
     // TODO: blob restore should work
 
@@ -156,21 +161,21 @@ public class BackupTests {
             UnreliableWallClock.SYSTEM_CLOCK);
 
     Sha256AndSize summary;
-    try (InputStream in = f.open()) {
+    try (InputStream in = fs.openRegularFileForReading(f.path())) {
       summary = Util.summarize(in, s -> { });
     }
 
     Assert.assertEquals(other.list(password).count(), 1L);
     other.list(password).forEach(info -> {
-      Assert.assertEquals(info.path(), f.getPath());
-      Assert.assertEquals(info.latestRevision().type, BackupIndex.FileType.REGULAR_FILE);
-      Assert.assertEquals(info.latestRevision().summary, summary);
+      Assert.assertEquals(info.path(), f.path());
+      Assert.assertTrue(info.latestRevision() instanceof BackupIndex.RegularFileRev);
+      Assert.assertEquals(((BackupIndex.RegularFileRev) info.latestRevision()).summary(), summary);
     });
 
     // backup with new password
     String newPassword = "fubar";
     Assert.assertNotEquals(password, newPassword);
-    other.backup(system, password, newPassword, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
+    other.backup(system, password, newPassword, fs, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
 
     // index is encrypted with new password
     try (DecryptedInputStream s = new DecryptedInputStream(Util.buffered(indexStore.read(indexStore.head())), newPassword)) {
@@ -181,13 +186,15 @@ public class BackupTests {
     Assert.assertEquals(blobDir.getPendingWrites().size(), 1);
 
     // backup without `f`
-    other.backup(system, newPassword, newPassword, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.singleton(f.getPath()));
+    other.backup(system, newPassword, newPassword, fs, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(), Collections.singleton(f.path()));
 
     // assert empty
     other.list(newPassword).forEach(info -> {
-      System.out.println("latest revision for " + info.path() + ": " + info.latestRevision().type);
+      System.out.println("latest revision for " + info.path() + ": " + info.latestRevision());
     });
-    Assert.assertEquals(other.list(newPassword).filter(info -> info.latestRevision().type != BackupIndex.FileType.TOMBSTONE).count(), 0L);
+    Assert.assertEquals(
+        other.list(newPassword).filter(info -> !(info.latestRevision() instanceof BackupIndex.TombstoneRev)).count(),
+        0L);
 
     // assert loadable
     backup = new BackerUpper(
@@ -197,7 +204,7 @@ public class BackupTests {
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
     backup.list(newPassword).forEach(info -> {
-      System.out.println("latest revision for " + info.path() + ": " + info.latestRevision().type);
+      System.out.println("latest revision for " + info.path() + ": " + info.latestRevision());
     });
 
   }
@@ -222,22 +229,19 @@ public class BackupTests {
     byte[] data = new byte[1024];
     Arrays.fill(data, (byte) 33);
 
-    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, data.length, null) {
+    Filesystem fs = new FakeFilesystem() {
       @Override
-      public InputStream open() {
+      public InputStream openRegularFileForReading(Path path) {
         return new ByteArrayInputStream(data);
       }
     };
 
-    RegularFile g = new RegularFile(Paths.get("/", "tmp", "other"), Instant.now(), data.length, null) {
-      @Override
-      public InputStream open() {
-        return new ByteArrayInputStream(data);
-      }
-    };
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, data.length, null);
+
+    RegularFile g = new RegularFile(Paths.get("/", "tmp", "other"), Instant.now(), data.length, null);
 
     Collection<Path> toForget = Collections.emptyList();
-    backup.backup(system, password, password, Arrays.asList(f, g), Collections.emptyList(), Collections.emptyList(), toForget);
+    backup.backup(system, password, password, fs, Arrays.asList(f, g), Collections.emptyList(), Collections.emptyList(), toForget);
 
     // Only one blob should be uploaded
     Assert.assertEquals(blobDir.getPendingWrites().size(), 1);
@@ -260,41 +264,32 @@ public class BackupTests {
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
 
-    Object inode1 = new Object();
-    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, inode1) {
+    Filesystem fs = new FakeFilesystem() {
       @Override
-      public InputStream open() {
+      public InputStream openRegularFileForReading(Path path) {
         byte[] data = new byte[1024];
-        for (int i = 0; i < data.length; ++i) {
-          data[i] = 33;
-        }
+        Arrays.fill(data, (byte) 33);
         return new ByteArrayInputStream(data);
       }
     };
 
+    Object inode1 = new Object();
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, inode1);
+
     backup.planBackup(system, password, password, FREE,
             Collections.singletonList(f),
             Collections.emptyList(),
-            Collections.emptyList()).execute();
+            Collections.emptyList()).execute(fs);
 
     Assert.assertEquals(blobDir.list().count(), 1L);
 
     Object inode2 = new Object();
-    f = new RegularFile(Paths.get("/", "foo", "bar"), f.getModTime(), f.getSizeInBytes(), inode2) {
-      @Override
-      public InputStream open() {
-        byte[] data = new byte[1024];
-        for (int i = 0; i < data.length; ++i) {
-          data[i] = 33;
-        }
-        return new ByteArrayInputStream(data);
-      }
-    };
+    f = new RegularFile(Paths.get("/", "foo", "bar"), f.modTime(), f.sizeInBytes(), inode2);
 
     backup.planBackup(system, password, password, FREE,
             Collections.singletonList(f),
             Collections.emptyList(),
-            Collections.emptyList()).execute();
+            Collections.emptyList()).execute(fs);
 
     Assert.assertEquals(blobDir.list().count(), 1L);
 
@@ -376,24 +371,24 @@ public class BackupTests {
             transform,
             UnreliableWallClock.SYSTEM_CLOCK);
 
-    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
+    RegularFile f = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null);
+
+    RegularFile g = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null);
+
+    Filesystem fs1 = new FakeFilesystem() {
       @Override
-      public InputStream open() {
+      public InputStream openRegularFileForReading(Path path) {
         byte[] data = new byte[1024];
-        for (int i = 0; i < data.length; ++i) {
-          data[i] = 33;
-        }
+        Arrays.fill(data, (byte) 33);
         return new ByteArrayInputStream(data);
       }
     };
 
-    RegularFile g = new RegularFile(Paths.get("/", "tmp", "file"), Instant.EPOCH, 1024, null) {
+    Filesystem fs2 = new FakeFilesystem() {
       @Override
-      public InputStream open() {
+      public InputStream openRegularFileForReading(Path path) {
         byte[] data = new byte[1024];
-        for (int i = 0; i < data.length; ++i) {
-          data[i] = 42;
-        }
+        Arrays.fill(data, (byte) 42);
         return new ByteArrayInputStream(data);
       }
     };
@@ -404,7 +399,7 @@ public class BackupTests {
         backupA.planBackup(systemA, password, password, FREE,
                 Collections.singletonList(f),
                 Collections.emptyList(),
-                Collections.emptyList()).execute();
+                Collections.emptyList()).execute(fs1);
       } catch (IOException | BackupIndex.MergeConflict e) {
         throw new RuntimeException(e);
       }
@@ -417,7 +412,7 @@ public class BackupTests {
     backupB.planBackup(systemB, password, password, FREE,
             Collections.singletonList(g),
             Collections.emptyList(),
-            Collections.emptyList()).execute();
+            Collections.emptyList()).execute(fs2);
 
     // Let A finish writing
     while (a.isAlive()) {
@@ -442,20 +437,6 @@ public class BackupTests {
     Assert.assertEquals(backupC.list(password).count(), 2L);
     ensureWf(indexStoreB, blobDir.settle(), transform, password);
 
-  }
-
-  private static class TestFile extends RegularFile {
-    private final byte[] contents;
-
-    public TestFile(@NonNull Path path, @NonNull Instant modTime, Object iNode, byte[] contents) {
-      super(path, modTime, contents.length, iNode);
-      this.contents = contents;
-    }
-
-    @Override
-    public InputStream open() {
-      return new ByteArrayInputStream(contents);
-    }
   }
 
   private static class TestClock implements UnreliableWallClock {
@@ -492,9 +473,17 @@ public class BackupTests {
             clock);
 
     Instant fCreation = clock.now();
-    var f = new TestFile(Paths.get("tmp", "a"), fCreation, 1, "contents".getBytes(StandardCharsets.UTF_8));
+    var f = new RegularFile(Paths.get("tmp", "a"), fCreation, 1, 100);
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) {
+        return new ByteArrayInputStream("contents".getBytes(StandardCharsets.UTF_8));
+      }
+    };
 
     backup.backup(system, password, password,
+            fs,
             Collections.singletonList(f),
             Collections.emptyList(),
             Collections.emptyList(),
@@ -502,7 +491,7 @@ public class BackupTests {
 
     var index = backup.list(password).collect(Collectors.toList());
     Assert.assertEquals(index.size(), 1);
-    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.REGULAR_FILE);
+    Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.RegularFileRev);
 
     // 10 days later, clean up everything older than 5 days
     clock.timePasses(Duration.ofDays(10));
@@ -511,19 +500,20 @@ public class BackupTests {
     // file should still be there
     index = backup.list(password).collect(Collectors.toList());
     Assert.assertEquals(index.size(), 1);
-    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.REGULAR_FILE);
+    Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.RegularFileRev);
     Assert.assertEquals(blobDir.list().count(), 1);
 
     backup.backup(system, password, password,
+            fs,
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList(),
-            Collections.singletonList(f.getPath()));
+            Collections.singletonList(f.path()));
 
     // file should be tombstoned
     index = backup.list(password).collect(Collectors.toList());
     Assert.assertEquals(index.size(), 1);
-    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.TOMBSTONE);
+    Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.TombstoneRev);
     Assert.assertEquals(blobDir.list().count(), 1);
 
     // 5 days later, clean up everything older than 15 days
@@ -533,7 +523,7 @@ public class BackupTests {
     // file should still be there
     index = backup.list(password).collect(Collectors.toList());
     Assert.assertEquals(index.size(), 1);
-    Assert.assertEquals(index.get(0).latestRevision().type, BackupIndex.FileType.TOMBSTONE);
+    Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.TombstoneRev);
     Assert.assertEquals(blobDir.list().count(), 1);
 
     // clean up everything older than 10 days
@@ -575,10 +565,18 @@ public class BackupTests {
             clock);
 
     Instant fCreation = clock.now();
-    var file = new TestFile(Paths.get("tmp", "a"), fCreation, 1, "contents".getBytes(StandardCharsets.UTF_8));
-    var link = new HardLink(Paths.get("home", "user", "file"), file.getPath());
+    var file = new RegularFile(Paths.get("tmp", "a"), fCreation, 1, 100);
+    var link = new HardLink(Paths.get("home", "user", "file"), file.path());
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) {
+        return new ByteArrayInputStream("contents".getBytes(StandardCharsets.UTF_8));
+      }
+    };
 
     backup.backup(system, password, password,
+            fs,
             Collections.singletonList(file),
             Collections.emptyList(),
             Collections.emptyList(),
@@ -587,6 +585,7 @@ public class BackupTests {
     clock.timePasses(Duration.ofDays(10));
 
     backup.backup(system, password, password,
+            fs,
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.singletonList(link),
@@ -618,20 +617,30 @@ public class BackupTests {
             clock);
 
     var contents = "contents".getBytes(StandardCharsets.UTF_8);
-    var fileA = new TestFile(Paths.get("tmp", "a"), clock.now(), 1, contents);
-    var fileB = new TestFile(Paths.get("tmp", "b"), clock.now(), 2, contents);
+    var fileA = new RegularFile(Paths.get("tmp", "a"), clock.now(), 1, 100);
+    var fileB = new RegularFile(Paths.get("tmp", "b"), clock.now(), 2, 101);
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) {
+        return new ByteArrayInputStream(contents);
+      }
+    };
+
 
     backup.backup(system, password, password,
+            fs,
             Collections.singletonList(fileA),
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList());
 
     backup.backup(system, password, password,
+            fs,
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList(),
-            Collections.singletonList(fileA.getPath()));
+            Collections.singletonList(fileA.path()));
 
     clock.timePasses(Duration.ofDays(10));
 
@@ -658,6 +667,7 @@ public class BackupTests {
     boolean failedDueToMergeConflict = false;
     try {
       backup.backup(system, password, password,
+              fs,
               Collections.singletonList(fileB),
               Collections.emptyList(),
               Collections.emptyList(),
@@ -671,6 +681,7 @@ public class BackupTests {
 
     // 2nd try should succeed, and re-upload the blob
     backup.backup(system, password, password,
+            fs,
             Collections.singletonList(fileB),
             Collections.emptyList(),
             Collections.emptyList(),
@@ -699,20 +710,30 @@ public class BackupTests {
             clock);
 
     var contents = "contents".getBytes(StandardCharsets.UTF_8);
-    var fileA = new TestFile(Paths.get("tmp", "a"), clock.now(), 1, contents);
-    var fileB = new TestFile(Paths.get("tmp", "b"), clock.now(), 2, contents);
+    var fileA = new RegularFile(Paths.get("tmp", "a"), clock.now(), 1, 100);
+    var fileB = new RegularFile(Paths.get("tmp", "b"), clock.now(), 2, 101);
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) {
+        return new ByteArrayInputStream(contents);
+      }
+    };
+
 
     backup.backup(system, password, password,
+            fs,
             Collections.singletonList(fileA),
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList());
 
     backup.backup(system, password, password,
+            fs,
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList(),
-            Collections.singletonList(fileA.getPath()));
+            Collections.singletonList(fileA.path()));
 
     clock.timePasses(Duration.ofDays(10));
 
@@ -732,6 +753,7 @@ public class BackupTests {
     var cleanupThatShouldFail = cleanup.planCleanup(password, Duration.ofDays(5), FREE);
 
     backup.backup(system, password, password,
+            fs,
             Collections.singletonList(fileB),
             Collections.emptyList(),
             Collections.emptyList(),
@@ -764,10 +786,18 @@ public class BackupTests {
             clock);
 
     Instant fCreation = clock.now();
-    var fileA = new TestFile(Paths.get("tmp", "a"), fCreation, 1, "contents".getBytes(StandardCharsets.UTF_8));
-    var fileB = new TestFile(Paths.get("tmp", "b"), fCreation, 2, "contents".getBytes(StandardCharsets.UTF_8));
+    var fileA = new RegularFile(Paths.get("tmp", "a"), fCreation, 1, 100);
+    var fileB = new RegularFile(Paths.get("tmp", "b"), fCreation, 2, 101);
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) {
+        return new ByteArrayInputStream("contents".getBytes(StandardCharsets.UTF_8));
+      }
+    };
 
     backup.backup(system, password, password,
+            fs,
             Arrays.asList(fileA, fileB),
             Collections.emptyList(),
             Collections.emptyList(),
@@ -780,10 +810,11 @@ public class BackupTests {
     // next day, tombstone B
     clock.timePasses(Duration.ofDays(1));
     backup.backup(system, password, password,
+            fs,
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList(),
-            Collections.singleton(fileB.getPath()));
+            Collections.singleton(fileB.path()));
 
     index = backup.list(password).collect(Collectors.toList());
     Assert.assertEquals(index.size(), 2);
@@ -826,19 +857,50 @@ public class BackupTests {
     Instant t1 = clock.now();
     clock.timePasses(Duration.ofHours(1));
     Instant t2 = clock.now();
-    var fileA = new TestFile(Paths.get("tmp", "a"), t1, 1, "contents1".getBytes(StandardCharsets.UTF_8));
-    var fileB = new TestFile(Paths.get("tmp", "b"), t1, 2, "contents1".getBytes(StandardCharsets.UTF_8));
-    var fileC = new TestFile(Paths.get("tmp", "c"), t2, 2, "contents2".getBytes(StandardCharsets.UTF_8));
-    var fileA2 = new TestFile(Paths.get("tmp", "a"), t2, 2, "contents3".getBytes(StandardCharsets.UTF_8));
+    var fileA = new RegularFile(Paths.get("tmp", "a"), t1, 1, 100);
+    var fileB = new RegularFile(Paths.get("tmp", "b"), t1, 2, 102);
+    var fileC = new RegularFile(Paths.get("tmp", "c"), t2, 2, 103);
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) throws NoSuchFileException {
+        if (path.equals(fileA.path())) {
+          return new ByteArrayInputStream("contents1".getBytes(StandardCharsets.UTF_8));
+        } else if (path.equals(fileB.path())) {
+          return new ByteArrayInputStream("contents1".getBytes(StandardCharsets.UTF_8));
+        } else if (path.equals(fileC.path())) {
+          return new ByteArrayInputStream("contents2".getBytes(StandardCharsets.UTF_8));
+        } else {
+          throw new NoSuchFileException(path.toString());
+        }
+      }
+    };
 
     backup.backup(system, password, password,
+            fs,
             Arrays.asList(fileA, fileB),
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList());
 
+    fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) throws NoSuchFileException {
+        if (path.equals(fileA.path())) {
+          return new ByteArrayInputStream("contents3".getBytes(StandardCharsets.UTF_8));
+        } else if (path.equals(fileB.path())) {
+          return new ByteArrayInputStream("contents1".getBytes(StandardCharsets.UTF_8));
+        } else if (path.equals(fileC.path())) {
+          return new ByteArrayInputStream("contents2".getBytes(StandardCharsets.UTF_8));
+        } else {
+          throw new NoSuchFileException(path.toString());
+        }
+      }
+    };
+
     backup.backup(system, password, password,
-            Arrays.asList(fileC, fileA2),
+            fs,
+            Arrays.asList(fileC, fileA),
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList());
@@ -860,7 +922,7 @@ public class BackupTests {
     for (;;) {
       try {
         Assert.assertEquals(
-                stringify(backup2.restore(password, index.getInfo(system, fileA.getPath()).get(0).summary)),
+                stringify(backup2.restore(password, ((BackupIndex.RegularFileRev) index.getInfo(system, fileA.path()).get(0)).summary())),
                 "contents1");
         break;
       } catch (NoSuchFileException ignored) {
@@ -871,7 +933,7 @@ public class BackupTests {
     for (;;) {
       try {
         Assert.assertEquals(
-                stringify(backup2.restore(password, index.getInfo(system, fileA.getPath()).get(1).summary)),
+                stringify(backup2.restore(password, ((BackupIndex.RegularFileRev) index.getInfo(system, fileA.path()).get(1)).summary())),
                 "contents3");
         break;
       } catch (NoSuchFileException ignored) {
@@ -882,7 +944,7 @@ public class BackupTests {
     for (;;) {
       try {
         Assert.assertEquals(
-                stringify(backup2.restore(password, index.getInfo(system, fileB.getPath()).get(0).summary)),
+                stringify(backup2.restore(password, ((BackupIndex.RegularFileRev) index.getInfo(system, fileB.path()).get(0)).summary())),
                 "contents1");
         break;
       } catch (NoSuchFileException ignored) {
@@ -893,7 +955,7 @@ public class BackupTests {
     for (;;) {
       try {
         Assert.assertEquals(
-                stringify(backup2.restore(password, index.getInfo(system, fileC.getPath()).get(0).summary)),
+                stringify(backup2.restore(password, ((BackupIndex.RegularFileRev) index.getInfo(system, fileC.path()).get(0)).summary())),
                 "contents2");
         break;
       } catch (NoSuchFileException ignored) {

@@ -4,8 +4,6 @@ import cal.bkup.Util;
 import cal.prim.NoValue;
 import cal.prim.PreconditionFailed;
 import cal.prim.concurrency.StringRegister;
-import lombok.NonNull;
-import lombok.Value;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -41,10 +39,7 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
     this.directory = directory;
   }
 
-  @Value
-  private static class MyTag implements Tag {
-    @NonNull String id;
-
+  private record MyTag(String id) implements Tag {
     @Override
     public String toString() {
       return id;

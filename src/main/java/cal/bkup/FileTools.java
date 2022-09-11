@@ -1,13 +1,12 @@
 package cal.bkup;
 
 import cal.bkup.types.Config;
-import cal.prim.fs.HardLink;
-import cal.prim.IOConsumer;
-import cal.prim.fs.RegularFile;
 import cal.bkup.types.Rule;
-import cal.prim.fs.SymLink;
+import cal.prim.IOConsumer;
 import cal.prim.fs.Filesystem;
-import cal.prim.fs.PhysicalFilesystem;
+import cal.prim.fs.HardLink;
+import cal.prim.fs.RegularFile;
+import cal.prim.fs.SymLink;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -23,15 +22,13 @@ import java.util.TreeSet;
 
 public class FileTools {
 
-  public static void forEachFile(Config config, IOConsumer<SymLink> symlinkConsumer, IOConsumer<HardLink> hardLinkConsumer, IOConsumer<RegularFile> consumer) throws IOException {
-    Filesystem fs = new PhysicalFilesystem();
-
-    List<Rule> rules = config.getBackupRules();
+  public static void forEachFile(Filesystem fs, Config config, IOConsumer<SymLink> symlinkConsumer, IOConsumer<HardLink> hardLinkConsumer, IOConsumer<RegularFile> consumer) throws IOException {
+    List<Rule> rules = config.backupRules();
     Set<PathMatcher> exclusions = new LinkedHashSet<>();
 
     // It is important that this is a sorted set.  This
     // gives us deterministic hard link detection.
-    SortedSet<RegularFile> regularFiles = new TreeSet<>(Comparator.comparing(RegularFile::getPath));
+    SortedSet<RegularFile> regularFiles = new TreeSet<>(Comparator.comparing(RegularFile::path));
 
     // (1) scan the filesystem
     for (int i = rules.size() - 1; i >= 0; --i) {
@@ -50,11 +47,11 @@ public class FileTools {
     // (2) hardlink detection
     Map<Object, Path> canonicalPathForEachInode = new HashMap<>();
     for (RegularFile f : regularFiles) {
-      Path canonical = canonicalPathForEachInode.putIfAbsent(f.getINode(), f.getPath());
+      Path canonical = canonicalPathForEachInode.putIfAbsent(f.iNode(), f.path());
       if (canonical == null) {
         consumer.accept(f);
       } else {
-        hardLinkConsumer.accept(new HardLink(f.getPath(), canonical));
+        hardLinkConsumer.accept(new HardLink(f.path(), canonical));
       }
     }
 
