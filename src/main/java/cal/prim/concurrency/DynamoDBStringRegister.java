@@ -80,16 +80,21 @@ public class DynamoDBStringRegister implements StringRegister {
 
   @Override
   public String read() throws IOException {
+    Map<String, AttributeValue> item;
     try {
-      Map<String, AttributeValue> item = client.getItem(GetItemRequest.builder()
+      item = client.getItem(GetItemRequest.builder()
               .tableName(tableName)
               .key(Collections.singletonMap(PRIMARY_KEY_FIELD, AttributeValue.builder().s(registerName).build()))
               .consistentRead(true)
               .build()).item();
-      return item == null ? "" : item.get(VALUE_FIELD).s();
     } catch (AwsServiceException e) {
       throw new IOException(e);
     }
+    if (item == null) {
+      return "";
+    }
+    AttributeValue val = item.get(VALUE_FIELD);
+    return val == null ? "" : val.s();
   }
 
   @Override
@@ -97,14 +102,15 @@ public class DynamoDBStringRegister implements StringRegister {
     Objects.requireNonNull(expectedValue, "expected value may not be null");
     Objects.requireNonNull(newValue, "new value may not be null");
 
+    // Without `attrNames`, service meets us with "DynamoDbException: Invalid ConditionExpression: Attribute name is a reserved keyword; reserved keyword: Value"
+    Map<String, String> attrNames = Collections.singletonMap("#VVV", VALUE_FIELD);
     // Dynamo does not allow empty strings, so we model the empty string as a missing record
     String precondition = expectedValue.isEmpty() ?
-            "attribute_not_exists(" + VALUE_FIELD + ")" :
-            VALUE_FIELD + " IN (:expectedValue)";
-//    Expected precondition = expectedValue.isEmpty() ?
-//            new Expected(VALUE_FIELD).notExist() :
-//            new Expected(VALUE_FIELD).eq(expectedValue);
-    var preconditionAttrs = Collections.singletonMap("expectedValue", AttributeValue.builder().s(expectedValue).build());
+            "attribute_not_exists(#VVV)" :
+            "#VVV IN (:expectedValue)";
+    Map<String, AttributeValue> preconditionAttrs = expectedValue.isEmpty() ?
+        null : // Collections.emptyMap() is met with "DynamoDbException: ExpressionAttributeValues must not be empty" from service
+        Collections.singletonMap(":expectedValue", AttributeValue.builder().s(expectedValue).build());
 
     try {
       if (newValue.isEmpty()) {
@@ -112,6 +118,7 @@ public class DynamoDBStringRegister implements StringRegister {
                 .tableName(tableName)
                 .key(Collections.singletonMap(PRIMARY_KEY_FIELD, AttributeValue.builder().s(registerName).build()))
                 .conditionExpression(precondition)
+                .expressionAttributeNames(attrNames)
                 .expressionAttributeValues(preconditionAttrs)
                 .build());
       } else {
@@ -123,6 +130,7 @@ public class DynamoDBStringRegister implements StringRegister {
                 .tableName(tableName)
                 .item(item)
                 .conditionExpression(precondition)
+                .expressionAttributeNames(attrNames)
                 .expressionAttributeValues(preconditionAttrs)
                 .build());
       }
