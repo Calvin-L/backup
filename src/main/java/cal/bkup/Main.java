@@ -16,6 +16,7 @@ import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SystemId;
 import cal.prim.NoValue;
 import cal.prim.Pair;
+import cal.prim.PreconditionFailed;
 import cal.prim.Price;
 import cal.prim.concurrency.DynamoDBStringRegister;
 import cal.prim.concurrency.SQLiteStringRegister;
@@ -144,6 +145,7 @@ public class Main {
     options.addOption("c", "spot-check", true, "Spot-check N backed-up files");
     options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
     options.addOption(Option.builder().longOpt("dump-index").desc("Dump the raw index (for debugging or recovery)").build());
+    options.addOption("t", "test", false, "Do a quick check of AWS actions (costs money, may leave behind some garbage)");
 
     CommandLine cli;
     try {
@@ -167,8 +169,9 @@ public class Main {
     final boolean dumpIndex = cli.hasOption("dump-index");
     final boolean local = cli.hasOption("local");
     final int numToCheck = cli.hasOption('c') ? Integer.parseInt(cli.getOptionValue('c')) : 0;
+    final boolean test = cli.hasOption('t');
 
-    if (!backup && !list && numToCheck == 0 && !gc && !dumpIndex) {
+    if (!backup && !list && numToCheck == 0 && !gc && !dumpIndex && !test) {
       System.err.println("No action specified. Did you mean to pass '-b'?");
       return;
     }
@@ -268,6 +271,26 @@ public class Main {
 
     // ------------------------------------------------------------------------------
     // Do the work
+
+    if (test) {
+      var credentials = AWSTools.credentialsProvider();
+      StringRegister register = new DynamoDBStringRegister(
+              DynamoDbClient.builder()
+                      .credentialsProvider(credentials)
+                      .region(AWS_REGION)
+                      .build(),
+              DYNAMO_TABLE,
+              DYNAMO_REGISTER + ".tmp");
+      String val = register.read();
+      try {
+        register.write(val, "test-value");
+        register.write("test-value", "");
+      } catch (PreconditionFailed exn) {
+        System.err.println("Test failed due to concurrent interference: " + exn.getMessage());
+        return;
+      }
+      System.out.println("Test OK");
+    }
 
     if (backup) {
       System.out.println("Scanning filesystem...");
