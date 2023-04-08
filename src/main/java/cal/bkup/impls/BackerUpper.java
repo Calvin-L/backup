@@ -27,6 +27,7 @@ import cal.prim.transforms.TrimmedInputStream;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,6 +36,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -47,6 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -427,13 +431,19 @@ public class BackerUpper {
     //      bumped the cleanup generation and saved the index successfully:
     //      pending backups cannot complete successfully.
     Set<String> blobsExistingAtStart = blobStore.list().collect(Collectors.toSet());
+    Set<RevisionID> revisionsAtStart = new LinkedHashSet<>(); // collected below
+    Set<BackupID> backupsAtStart = index.knownSystems().stream()
+        .flatMap(sys -> index.knownBackups(sys).stream().map(b -> new BackupID(sys, b)))
+        .collect(Collectors.toSet());
 
-    Set<SystemId> systemsToForget = new LinkedHashSet<>();
-    Set<BackupID> backupsToForget = new LinkedHashSet<>();
-    Set<RevisionID> revisionsToForget = new LinkedHashSet<>();
-    Set<Sha256AndSize> blobsToForget = new LinkedHashSet<>();
-    Set<String> blobsToDelete = new LinkedHashSet<>();
+    // "Mark" -- find everything reachable
+    Set<RevisionID> reachableRevisions = new LinkedHashSet<>();
+    Set<BackupID> reachableBackups = new LinkedHashSet<>();
+    Set<SystemId> reachableSystems = new LinkedHashSet<>();
+    Set<String> reachableBlobs = new LinkedHashSet<>();
+    Set<Sha256AndSize> reachableSummaries = new LinkedHashSet<>();
 
+    Queue<RevisionID> revisionsToVisit = new ArrayDeque<>();
     for (SystemId system : index.knownSystems()) {
       var backups = index.knownBackups(system);
       if (backups.size() > 0) {
@@ -446,64 +456,54 @@ public class BackerUpper {
 
         for (Path path : Util.sorted(index.knownPaths(system))) {
           for (BackupIndex.Revision revision : index.getInfo(system, path)) {
-            if (isSafeToForget(index, system, path, revision, earliestBackupToKeep)) {
-              revisionsToForget.add(new RevisionID(system, path, revision));
+            var revID = new RevisionID(system, path, revision);
+            revisionsAtStart.add(revID);
+            if (!(revision instanceof BackupIndex.TombstoneRev) && !isSafeToForget(index, system, path, revision, earliestBackupToKeep)) {
+              revisionsToVisit.add(revID);
             }
-          }
-          for (BackupIndex.Revision revision : index.getInfo(system, path)) {
-            var r = new RevisionID(system, path, revision);
-            if (revisionsToForget.contains(r)) {
-              continue;
-            } else if (revision instanceof BackupIndex.TombstoneRev) {
-              revisionsToForget.add(new RevisionID(system, path, revision));
-            } else {
-              break;
-            }
-          }
-        }
-      }
-
-      for (BackupIndex.BackupMetadata info : backups) {
-        if (index.knownPaths(system).stream()
-                .allMatch(p -> index.getInfo(system, p).stream()
-                        .filter(r -> r.backupNumber() == info.backupNumber())
-                        .allMatch(r -> revisionsToForget.contains(new RevisionID(system, p, r))))) {
-          backupsToForget.add(new BackupID(system, info));
-        }
-      }
-
-      if (index.knownBackups(system).stream()
-              .allMatch(bkup -> backupsToForget.contains(new BackupID(system, bkup)))) {
-        systemsToForget.add(system);
-      }
-    }
-
-    // "Mark" -- find all referenced blobs
-    Set<Sha256AndSize> referencedBlobs = new HashSet<>();
-    for (SystemId system : index.knownSystems()) {
-      for (Path path : Util.sorted(index.knownPaths(system))) {
-        for (BackupIndex.Revision revision : index.getInfo(system, path)) {
-          if (revision instanceof BackupIndex.RegularFileRev f && !revisionsToForget.contains(new RevisionID(system, path, revision))) {
-            referencedBlobs.add(f.summary());
           }
         }
       }
     }
 
-    index.listBlobs()
-            .filter(b -> !referencedBlobs.contains(b))
-            .forEach(blobsToForget::add);
+    while (revisionsToVisit.size() > 0) {
+      var revID = revisionsToVisit.poll();
+      var system = revID.system();
+      if (reachableRevisions.add(revID)) {
+        index.knownBackups(system).stream()
+            .filter(backup -> backup.backupNumber() == revID.revision().backupNumber())
+            .map(info -> new BackupID(system, info))
+            .forEach(reachableBackups::add);
+        reachableSystems.add(system);
+        if (revID.revision() instanceof BackupIndex.RegularFileRev f) {
+          reachableBlobs.add(Objects.requireNonNull(index.lookupBlob(f.summary())).idAtTarget());
+          reachableSummaries.add(f.summary());
+        } else if (revID.revision() instanceof BackupIndex.HardLinkRev l) {
+          var target = index.resolveHardLinkTarget(system, l);
+          revisionsToVisit.add(new RevisionID(system, l.target(), target));
+        }
 
-    Set<String> blobsExistingAtEnd = referencedBlobs.stream()
-            .map(index::lookupBlob)
-            .map(Objects::requireNonNull)
-            .map(BackupReport::idAtTarget)
-            .collect(Collectors.toSet());
+        // If this is a non-tombstone, then the next tombstone after it is also reachable.
+        if (!(revID.revision() instanceof BackupIndex.TombstoneRev)) {
+          Optional<BackupIndex.Revision> maybeNextRevision = index.getInfo(system, revID.path()).stream()
+              .filter(rev -> rev.backupNumber() > revID.revision().backupNumber())
+              .min(Comparator.comparingLong(BackupIndex.Revision::backupNumber));
+          if (maybeNextRevision.isPresent()) {
+            var nextRevision = maybeNextRevision.get();
+            if (nextRevision instanceof BackupIndex.TombstoneRev) {
+              revisionsToVisit.add(new RevisionID(system, revID.path(), nextRevision));
+            }
+          }
+        }
+      }
+    }
 
     // "Sweep" -- anything that isn't referenced can be deleted
-    blobsToDelete.clear();
-    blobsToDelete.addAll(blobsExistingAtStart);
-    blobsToDelete.removeAll(blobsExistingAtEnd);
+    Set<SystemId> systemsToForget = Sets.difference(index.knownSystems(), reachableSystems);
+    Set<BackupID> backupsToForget = Sets.difference(backupsAtStart, reachableBackups);
+    Set<RevisionID> revisionsToForget = Sets.difference(revisionsAtStart, reachableRevisions);
+    Set<String> blobsToDelete = Sets.difference(blobsExistingAtStart, reachableBlobs);
+    Set<Sha256AndSize> summariesToForget = Sets.difference(index.listBlobs().collect(Collectors.toSet()), reachableSummaries);
 
     Multimap<String, BackupReport> backedUpBlobsByIDAtTarget = index.listBlobs()
             .map(index::lookupBlob)
@@ -561,6 +561,8 @@ public class BackerUpper {
       @Override
       public void execute() throws IOException, BackupIndex.MergeConflict {
         System.out.println("Cleaning up index");
+        index.checkIntegrity();
+
         for (RevisionID rev : revisionsToForget) {
           index.forgetRevision(rev.system, rev.path, rev.revision);
         }
@@ -570,7 +572,7 @@ public class BackerUpper {
         for (SystemId system : systemsToForget) {
           index.forgetSystem(system);
         }
-        for (Sha256AndSize blob : blobsToForget) {
+        for (Sha256AndSize blob : summariesToForget) {
           index.forgetBlob(blob);
         }
 

@@ -852,6 +852,56 @@ public class BackupTests {
     ensureWf(indexStore, blobDir, transform, password);
   }
 
+  @Test
+  public void testCleanupRetainsOldTargetsOfHardLinks() throws IOException, BackupIndex.MergeConflict {
+
+    final SystemId system = new SystemId("foobar");
+    final String password = "fizzbuzz";
+
+    final var indexDir = new ConsistentInMemoryDir();
+    final var blobDir = new ConsistentInMemoryDir();
+    final ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(new InMemoryStringRegister(), indexDir);
+    final TestClock clock = new TestClock();
+
+    BlobTransformer transform = new XZCompression();
+    BackerUpper backup = new BackerUpper(
+            indexStore,
+            FORMAT,
+            new BlobStoreOnDirectory(blobDir),
+            transform,
+            clock);
+
+    Instant fCreation = clock.now();
+    var file1 = new RegularFile(Paths.get("tmp", "a"), fCreation, 1, 100);
+    var file2 = new RegularFile(Paths.get("tmp", "c"), fCreation, 1, 100);
+    var link = new HardLink(Paths.get("tmp", "c"), Paths.get("tmp", "a"));
+
+    Filesystem fs = new FakeFilesystem() {
+      @Override
+      public InputStream openRegularFileForReading(Path path) {
+
+        return new ByteArrayInputStream("contents".getBytes(StandardCharsets.UTF_8));
+      }
+    };
+
+    backup.backup(system, password, password,
+            fs,
+            Collections.singletonList(file1),
+            Collections.emptyList(),
+            Collections.singletonList(link),
+            Collections.emptyList());
+
+    clock.timePasses(Duration.ofDays(5));
+    backup.backup(system, password, password,
+            fs,
+            Collections.singletonList(file2),
+            Collections.emptyList(),
+            Collections.singletonList(link),
+            Collections.singletonList(file1.path()));
+
+    backup.planCleanup(password, Duration.ofDays(1), FREE).execute();
+  }
+
   private static String stringify(InputStream data) throws IOException {
     try (InputStream is = data) {
       return new String(Util.read(is), StandardCharsets.UTF_8);
