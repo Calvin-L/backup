@@ -25,6 +25,8 @@ import cal.prim.transforms.Encryption;
 import cal.prim.transforms.StatisticsCollectingInputStream;
 import cal.prim.transforms.TrimmedInputStream;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -48,7 +50,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -504,10 +505,10 @@ public class BackerUpper {
     blobsToDelete.addAll(blobsExistingAtStart);
     blobsToDelete.removeAll(blobsExistingAtEnd);
 
-    Map<String, BackupReport> backedUpBlobsByIDAtTarget = index.listBlobs()
+    Multimap<String, BackupReport> backedUpBlobsByIDAtTarget = index.listBlobs()
             .map(index::lookupBlob)
             .map(Objects::requireNonNull)
-            .collect(Collectors.toMap(BackupReport::idAtTarget, Function.identity()));
+            .collect(ArrayListMultimap::create, (m, i) -> m.put(i.idAtTarget(), i), Multimap::putAll);
 
     return new CleanupPlan() {
       @Override
@@ -525,6 +526,7 @@ public class BackerUpper {
         return blobsToDelete.stream()
                 .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
+                .flatMap(Collection::stream)
                 .mapToLong(BackupReport::sizeAtTarget)
                 .sum();
       }
@@ -534,6 +536,7 @@ public class BackerUpper {
         return blobsToDelete.stream()
                 .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
+                .flatMap(Collection::stream)
                 .map(report -> blobStorageCosts.costToDeleteBlob(report.sizeAtTarget(), Duration.ZERO))
                 .reduce(Price.ZERO, Price::plus);
       }
@@ -543,6 +546,7 @@ public class BackerUpper {
         return blobsToDelete.stream()
                 .map(backedUpBlobsByIDAtTarget::get)
                 .filter(Objects::nonNull)
+                .flatMap(Collection::stream)
                 .mapToLong(BackupReport::sizeAtTarget)
                 .mapToObj(blobStorageCosts::monthlyStorageCostForBlob)
                 .reduce(Price.ZERO, Price::plus)

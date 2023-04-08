@@ -474,23 +474,30 @@ public class BackupTests {
 
     Instant fCreation = clock.now();
     var f = new RegularFile(Paths.get("tmp", "a"), fCreation, 1, 100);
+    var g = new RegularFile(Paths.get("tmp", "b"), fCreation, 9, 101);
 
     Filesystem fs = new FakeFilesystem() {
       @Override
       public InputStream openRegularFileForReading(Path path) {
-        return new ByteArrayInputStream("contents".getBytes(StandardCharsets.UTF_8));
+        if (path.equals(f.path())) {
+          return new ByteArrayInputStream("contents".getBytes(StandardCharsets.UTF_8));
+        } else if (path.equals(g.path())) {
+          return new ByteArrayInputStream("foo".getBytes(StandardCharsets.UTF_8));
+        } else {
+          throw new IllegalArgumentException(path.toString());
+        }
       }
     };
 
     backup.backup(system, password, password,
             fs,
-            Collections.singletonList(f),
+            Arrays.asList(f, g),
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList());
 
     var index = backup.list(password).collect(Collectors.toList());
-    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.size(), 2);
     Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.RegularFileRev);
 
     // 10 days later, clean up everything older than 5 days
@@ -499,22 +506,22 @@ public class BackupTests {
 
     // file should still be there
     index = backup.list(password).collect(Collectors.toList());
-    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.size(), 2);
     Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.RegularFileRev);
-    Assert.assertEquals(blobDir.list().count(), 1);
+    Assert.assertTrue(blobDir.list().findAny().isPresent());
 
     backup.backup(system, password, password,
             fs,
             Collections.emptyList(),
             Collections.emptyList(),
             Collections.emptyList(),
-            Collections.singletonList(f.path()));
+            Arrays.asList(f.path(), g.path()));
 
     // file should be tombstoned
     index = backup.list(password).collect(Collectors.toList());
-    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.size(), 2);
     Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.TombstoneRev);
-    Assert.assertEquals(blobDir.list().count(), 1);
+    Assert.assertTrue(blobDir.list().findAny().isPresent());
 
     // 5 days later, clean up everything older than 15 days
     clock.timePasses(Duration.ofDays(5));
@@ -522,12 +529,25 @@ public class BackupTests {
 
     // file should still be there
     index = backup.list(password).collect(Collectors.toList());
-    Assert.assertEquals(index.size(), 1);
+    Assert.assertEquals(index.size(), 2);
     Assert.assertTrue(index.get(0).latestRevision() instanceof BackupIndex.TombstoneRev);
-    Assert.assertEquals(blobDir.list().count(), 1);
+    Assert.assertTrue(blobDir.list().findAny().isPresent());
 
     // clean up everything older than 10 days
-    backup.planCleanup(password, Duration.ofDays(10), FREE).execute();
+    var plan = backup.planCleanup(password, Duration.ofDays(10), FREE);
+    Assert.assertEquals(plan.totalBlobsReclaimed(), blobDir.list().count());
+    Assert.assertEquals(plan.bytesReclaimed(), blobDir.list().mapToLong(s -> {
+      long count = 0;
+      try (InputStream in = blobDir.open(s)) {
+        while (in.read() >= 0) {
+          ++count;
+        }
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+      return count;
+    }).sum());
+    plan.execute();
 
     // file should be gone
     index = backup.list(password).collect(Collectors.toList());
@@ -538,10 +558,10 @@ public class BackupTests {
     System.out.println("blob dir = " + blobDir);
 
     // cleanup should retain the newest index, and may retain others
-    Assert.assertTrue(indexDir.list().count() >= 1);
+    Assert.assertTrue(indexDir.list().findAny().isPresent());
 
     // cleanup should drop unused blobs
-    Assert.assertEquals(blobDir.list().count(), 0);
+    Assert.assertTrue(blobDir.list().findAny().isEmpty());
     ensureWf(indexStore, blobDir, transform, password);
 
   }
