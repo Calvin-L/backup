@@ -518,7 +518,12 @@ public class BackerUpper {
 
       @Override
       public long untrackedBlobsReclaimed() {
-        return (long)(blobsToDelete.size()) - blobsToForget.size();
+        Set<String> blobsKnownToIndex = index.listBlobs()
+            .map(index::lookupBlob)
+            .map(Objects::requireNonNull)
+            .map(BackupReport::idAtTarget)
+            .collect(Collectors.toSet());
+        return blobsToDelete.stream().filter(b -> !blobsKnownToIndex.contains(b)).count();
       }
 
       @Override

@@ -547,6 +547,7 @@ public class BackupTests {
       }
       return count;
     }).sum());
+    Assert.assertEquals(plan.untrackedBlobsReclaimed(), 0);
     plan.execute();
 
     // file should be gone
