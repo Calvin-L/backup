@@ -2,18 +2,18 @@ package cal.bkup.impls;
 
 import cal.bkup.Util;
 import cal.bkup.types.BackupReport;
+import cal.bkup.types.IndexFormat;
+import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
 import cal.prim.fs.HardLink;
-import cal.bkup.types.IndexFormat;
-import cal.bkup.types.Sha256AndSize;
 import cal.prim.fs.SymLink;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
