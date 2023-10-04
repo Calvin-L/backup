@@ -16,7 +16,7 @@ checkerFramework {
   checkers = [
     "org.checkerframework.checker.nullness.NullnessChecker",
     // "org.checkerframework.checker.interning.InterningChecker",
-    // "org.checkerframework.checker.regex.RegexChecker",
+    "org.checkerframework.checker.regex.RegexChecker",
     "org.checkerframework.checker.resourceleak.ResourceLeakChecker",
   ]
   extraJavacArgs = [

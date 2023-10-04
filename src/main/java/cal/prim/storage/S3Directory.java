@@ -75,6 +75,7 @@ public class S3Directory implements EventuallyConsistentDirectory {
       Iterator<S3Object> current = listing.contents().iterator();
 
       @Override
+      @SuppressWarnings("argument") // false positive?
       public boolean tryAdvance(Consumer<? super String> action) {
         if (!current.hasNext() && listing.isTruncated()) {
           listing = s3client.listObjectsV2(request.toBuilder()
