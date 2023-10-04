@@ -17,6 +17,7 @@ import cal.prim.fs.Link;
 import cal.prim.fs.RegularFile;
 import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
+import cal.prim.storage.ConsistentBlob.Tag;
 import cal.prim.storage.EventuallyConsistentBlobStore;
 import cal.prim.time.MonotonicRealTimeClock;
 import cal.prim.time.UnreliableWallClock;
@@ -28,6 +29,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import org.checkerframework.checker.mustcall.qual.MustCall;
+import org.checkerframework.checker.nullness.qual.EnsuresNonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -68,6 +72,7 @@ import java.util.stream.Stream;
  *   <li>One master password encrypts an index containing the keys and other metadata</li>
  * </ul>
  */
+@SuppressWarnings({"unboxing.of.nullable", "contracts.postcondition", "argument", "assignment", "initialization.field.uninitialized", "dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return", "methodref.receiver.bound"}) // TODO
 public class BackerUpper {
 
   // Configuration: how do things get stored
@@ -80,8 +85,8 @@ public class BackerUpper {
   private final Duration PERIODIC_INDEX_RATE = Duration.ofMinutes(15);
 
   // Cached data
-  private BackupIndex index = null;
-  private ConsistentBlob.Tag tagForLastIndexLoad = null;
+  private @Nullable BackupIndex index = null;
+  private @Nullable Tag tagForLastIndexLoad = null;
 
   public BackerUpper(ConsistentBlob indexStore, IndexFormat indexFormat, EventuallyConsistentBlobStore blobStore, BlobTransformer transformer, UnreliableWallClock wallClock) {
     this.indexStore = indexStore;
@@ -365,9 +370,14 @@ public class BackerUpper {
       throw new NoSuchElementException();
     }
     InputStream s = Util.buffered(blobStore.open(report.idAtTarget()));
-    s.skipNBytes(report.offsetAtTarget());
-    s = new TrimmedInputStream(s, report.sizeAtTarget());
-    return transformer.followedBy(new Encryption(report.key())).unApply(s);
+    try {
+      s.skipNBytes(report.offsetAtTarget());
+      s = new TrimmedInputStream(s, report.sizeAtTarget());
+      return transformer.followedBy(new Encryption(report.key())).unApply(s);
+    } catch (Exception e) {
+      s.close();
+      throw e;
+    }
   }
 
   public interface CleanupPlan {
@@ -466,8 +476,8 @@ public class BackerUpper {
       }
     }
 
-    while (revisionsToVisit.size() > 0) {
-      var revID = revisionsToVisit.poll();
+    while (!revisionsToVisit.isEmpty()) {
+      var revID = revisionsToVisit.remove();
       var system = revID.system();
       if (reachableRevisions.add(revID)) {
         index.knownBackups(system).stream()
@@ -476,7 +486,11 @@ public class BackerUpper {
             .forEach(reachableBackups::add);
         reachableSystems.add(system);
         if (revID.revision() instanceof BackupIndex.RegularFileRev f) {
-          reachableBlobs.add(Objects.requireNonNull(index.lookupBlob(f.summary())).idAtTarget());
+          var info = index.lookupBlob(f.summary());
+          if (info == null) {
+            throw new IllegalStateException("No blob available for file revision " + f);
+          }
+          reachableBlobs.add(info.idAtTarget());
           reachableSummaries.add(f.summary());
         } else if (revID.revision() instanceof BackupIndex.HardLinkRev l) {
           var target = index.resolveHardLinkTarget(system, l);
@@ -618,7 +632,7 @@ public class BackerUpper {
       InputStream current;
       ProgressDisplay.Task task;
 
-      final Consumer<StatisticsCollectingInputStream> reportProgress = s ->
+      final Consumer<@MustCall({}) StatisticsCollectingInputStream> reportProgress = s ->
               display.reportProgress(task, s.getBytesRead(), currentFile.sizeInBytes());
 
       {
@@ -707,7 +721,7 @@ public class BackerUpper {
   // -------------------------------------------------------------------------
   // Helpers for managing the index
 
-  private Pair<ConsistentBlob.Tag, BackupIndex> readLatestFromIndexStore(String password) throws IOException {
+  private Pair<Tag, BackupIndex> readLatestFromIndexStore(String password) throws IOException {
     for (;;) {
       var tag = indexStore.head();
       BackupIndex index;
@@ -728,6 +742,7 @@ public class BackerUpper {
     }
   }
 
+  @EnsuresNonNull({"this.index", "this.tagForLastIndexLoad"})
   private void loadIndexIfMissing(String password) throws IOException {
     if (index == null) {
       var tagAndIndex = readLatestFromIndexStore(password);

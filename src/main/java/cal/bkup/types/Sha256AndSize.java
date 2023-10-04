@@ -1,5 +1,7 @@
 package cal.bkup.types;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -15,7 +17,7 @@ public record Sha256AndSize(byte[] sha256, long size) {
   // NOTE: Arrays use reference equality, so we need our own equals() and hashCode()
 
   @Override
-  public boolean equals(Object obj) {
+  public boolean equals(@Nullable Object obj) {
     return obj instanceof Sha256AndSize other &&
             size == other.size &&
             Arrays.equals(sha256, other.sha256);

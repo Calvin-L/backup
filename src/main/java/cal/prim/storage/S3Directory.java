@@ -2,6 +2,7 @@ package cal.prim.storage;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -90,7 +91,7 @@ public class S3Directory implements EventuallyConsistentDirectory {
       }
 
       @Override
-      public Spliterator<String> trySplit() {
+      public @Nullable Spliterator<String> trySplit() {
         return null;
       }
 

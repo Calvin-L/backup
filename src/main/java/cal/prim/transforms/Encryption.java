@@ -1,5 +1,7 @@
 package cal.prim.transforms;
 
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
+
 import java.io.InputStream;
 
 public class Encryption implements BlobTransformer {
@@ -11,12 +13,12 @@ public class Encryption implements BlobTransformer {
   }
 
   @Override
-  public InputStream apply(InputStream data) {
+  public @MustCallAlias InputStream apply(@MustCallAlias InputStream data) {
     return new EncryptedInputStream(data, key);
   }
 
   @Override
-  public InputStream unApply(InputStream data) {
+  public @MustCallAlias InputStream unApply(@MustCallAlias InputStream data) {
     return new DecryptedInputStream(data, key);
   }
 

@@ -1,14 +1,18 @@
 package cal.prim.transforms;
 
+import org.checkerframework.checker.calledmethods.qual.EnsuresCalledMethods;
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
+import org.checkerframework.checker.mustcall.qual.Owning;
+
 import java.io.IOException;
 import java.io.InputStream;
 
 public class TrimmedInputStream extends InputStream {
 
-  private final InputStream wrapped;
+  private final @Owning InputStream wrapped;
   private long remainingBytes;
 
-  public TrimmedInputStream(InputStream wrapped, long remainingBytes) {
+  public @MustCallAlias TrimmedInputStream(@MustCallAlias InputStream wrapped, long remainingBytes) {
     this.wrapped = wrapped;
     this.remainingBytes = remainingBytes;
   }
@@ -23,6 +27,7 @@ public class TrimmedInputStream extends InputStream {
   }
 
   @Override
+  @EnsuresCalledMethods(value = "wrapped", methods = {"close"})
   public void close() throws IOException {
     wrapped.close();
   }

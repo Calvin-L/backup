@@ -1,0 +1,8 @@
+package org.tukaani.xz;
+
+import java.io.InputStream;
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
+
+public class XZInputStream extends InputStream {
+    public @MustCallAlias XZInputStream(@MustCallAlias InputStream in) throws IOException;
+}

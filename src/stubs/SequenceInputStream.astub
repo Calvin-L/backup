@@ -1,0 +1,8 @@
+package java.io;
+
+import java.io.InputStream;
+import org.checkerframework.checker.mustcall.qual.Owning;
+
+public class SequenceInputStream extends InputStream {
+    public SequenceInputStream(@Owning InputStream s1, @Owning InputStream s2);
+}

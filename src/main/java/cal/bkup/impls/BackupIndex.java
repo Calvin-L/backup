@@ -9,8 +9,9 @@ import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-import javax.annotation.Nullable;
 import java.math.BigInteger;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -100,7 +101,7 @@ public class BackupIndex {
   }
 
   @Override
-  public boolean equals(Object o) {
+  public boolean equals(@Nullable Object o) {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     BackupIndex that = (BackupIndex) o;
@@ -382,7 +383,7 @@ public class BackupIndex {
     }
   }
 
-  private static final class MergeMaps<K, V> implements Merger<Map<K, V>> {
+  private static final class MergeMaps<K extends @NonNull Object, V> implements Merger<Map<K, V>> {
     private final Merger<V> valueMerger;
 
     public MergeMaps(Merger<V> valueMerger) {
@@ -395,8 +396,9 @@ public class BackupIndex {
       for (Map.Entry<K, V> entry : y.entrySet()) {
         K key = entry.getKey();
         V val = entry.getValue();
-        if (result.containsKey(key)) {
-          result.put(key, valueMerger.merge(result.get(key), val));
+        V resultVal = result.get(key);
+        if (resultVal != null) {
+          result.put(key, valueMerger.merge(resultVal, val));
         } else {
           result.put(key, val);
         }

@@ -47,7 +47,10 @@ public class FileTools {
     // (2) hardlink detection
     Map<Object, Path> canonicalPathForEachInode = new HashMap<>();
     for (RegularFile f : regularFiles) {
-      Path canonical = canonicalPathForEachInode.putIfAbsent(f.iNode(), f.path());
+      var inode = f.iNode();
+      Path canonical = inode != null
+          ? canonicalPathForEachInode.putIfAbsent(inode, f.path())
+          : null;
       if (canonical == null) {
         consumer.accept(f);
       } else {

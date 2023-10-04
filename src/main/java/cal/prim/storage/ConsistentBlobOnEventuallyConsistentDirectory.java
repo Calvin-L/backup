@@ -26,7 +26,7 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
   private final EventuallyConsistentDirectory directory;
 
   public ConsistentBlobOnEventuallyConsistentDirectory(StringRegister clock, EventuallyConsistentDirectory directory) throws IOException {
-    if (clock.read().equals("")) {
+    if (clock.read().isEmpty()) {
       String name = freshName(0);
       directory.createOrReplace(name, new ByteArrayInputStream(new byte[0]));
       try {
@@ -54,15 +54,19 @@ public class ConsistentBlobOnEventuallyConsistentDirectory implements Consistent
     }
   }
 
-  private String freshName(long associatedClockValue) {
-    return "backup-" + associatedClockValue + '-' + UUID.randomUUID().toString();
+  private static String freshName(long associatedClockValue) {
+    return "backup-" + associatedClockValue + '-' + UUID.randomUUID();
   }
 
   private long associatedClockValue(String name) {
     Matcher m = NAME_PATTERN.matcher(name);
     if (m.find()) {
       try {
-        return Long.parseLong(m.group(1));
+        String g1 = m.group(1);
+        if (g1 == null) {
+          throw new IllegalArgumentException("not a well-formed name: " + name);
+        }
+        return Long.parseLong(g1);
       } catch (NumberFormatException e) {
         throw new IllegalArgumentException("not a well-formed name: " + name, e);
       }

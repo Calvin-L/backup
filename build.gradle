@@ -1,6 +1,7 @@
 plugins {
     id "java"
     id "application"
+    id "org.checkerframework" version "0.6.34"
 }
 
 java {
@@ -10,6 +11,18 @@ java {
 }
 
 version = "1.0"
+
+checkerFramework {
+  checkers = [
+    "org.checkerframework.checker.nullness.NullnessChecker",
+    // "org.checkerframework.checker.interning.InterningChecker",
+    // "org.checkerframework.checker.regex.RegexChecker",
+    // "org.checkerframework.checker.resourceleak.ResourceLeakChecker",
+  ]
+  extraJavacArgs = [
+    "-Astubs=${projectDir}/src/stubs/",
+  ]
+}
 
 ////////////////////////// Application setup
 application {
@@ -35,7 +48,7 @@ dependencies {
     implementation "commons-cli:commons-cli:1.5.0"
     implementation "com.fasterxml.jackson.core:jackson-databind:2.15.2"
     implementation "org.apache.commons:commons-math3:3.6.1"
-    implementation "com.google.code.findbugs:jsr305:3.0.2"
+//    implementation "org.checkerframework:checker-qual:3.39.0"
     implementation "com.google.guava:guava:32.1.2-jre"
     testImplementation "org.testng:testng:7.8.0"
 

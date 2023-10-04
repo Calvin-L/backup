@@ -1,6 +1,8 @@
 package cal.prim.transforms;
 
 import cal.bkup.Util;
+import org.checkerframework.checker.mustcall.qual.MustCall;
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -11,11 +13,11 @@ import java.util.function.Consumer;
 public class StatisticsCollectingInputStream extends FilterInputStream {
 
   private final MessageDigest digest;
-  private final Consumer<StatisticsCollectingInputStream> onProgress;
+  private final Consumer<@MustCall({}) StatisticsCollectingInputStream> onProgress;
   private long bytesRead;
   private boolean closed;
 
-  public StatisticsCollectingInputStream(InputStream in, Consumer<StatisticsCollectingInputStream> onProgress) {
+  public @MustCallAlias StatisticsCollectingInputStream(@MustCallAlias InputStream in, Consumer<@MustCall({}) StatisticsCollectingInputStream> onProgress) {
     super(in);
     digest = Util.sha256Digest();
     this.onProgress = onProgress;

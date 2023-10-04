@@ -1,23 +1,25 @@
 package cal.prim.transforms;
 
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
+
 import java.io.IOException;
 import java.io.InputStream;
 
 public interface BlobTransformer {
 
-  InputStream apply(InputStream data) throws IOException;
-  InputStream unApply(InputStream data) throws IOException;
+  @MustCallAlias InputStream apply(@MustCallAlias InputStream data) throws IOException;
+  @MustCallAlias InputStream unApply(@MustCallAlias InputStream data) throws IOException;
 
   default BlobTransformer followedBy(BlobTransformer next) {
     BlobTransformer self = this;
     return new BlobTransformer() {
       @Override
-      public InputStream apply(InputStream data) throws IOException {
+      public @MustCallAlias InputStream apply(@MustCallAlias InputStream data) throws IOException {
         return next.apply(self.apply(data));
       }
 
       @Override
-      public InputStream unApply(InputStream data) throws IOException {
+      public @MustCallAlias InputStream unApply(@MustCallAlias InputStream data) throws IOException {
         return self.unApply(next.unApply(data));
       }
     };

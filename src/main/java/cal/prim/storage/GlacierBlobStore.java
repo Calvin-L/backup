@@ -218,8 +218,8 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
   @Override
   public Stream<String> list() throws IOException {
     List<String> res = new ArrayList<>();
-    try (InputStream in = loadInventory()) {
-      JsonParser parser = new JsonFactory().createParser(in);
+    try (InputStream in = loadInventory();
+         JsonParser parser = new JsonFactory().createParser(in)) {
       JsonToken tok;
       String currentField = null;
       String archiveId = null;

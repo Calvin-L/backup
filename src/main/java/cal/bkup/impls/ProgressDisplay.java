@@ -2,6 +2,7 @@ package cal.bkup.impls;
 
 import cal.prim.QuietAutoCloseable;
 import cal.prim.RateLimitedRunnable;
+import org.checkerframework.checker.initialization.qual.UnknownInitialization;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -10,7 +11,7 @@ import java.util.List;
 public class ProgressDisplay implements QuietAutoCloseable {
 
   public static class Task {
-    private String description;
+    private final String description;
     private long progress;
     private long denominator;
 
@@ -50,7 +51,7 @@ public class ProgressDisplay implements QuietAutoCloseable {
     return String.format("%3d", numerator * 100 / denominator) + '%';
   }
 
-  private void printTask(Task task) {
+  private void printTask(@UnknownInitialization ProgressDisplay this, Task task) {
     System.out.println('[' + formatPercent(totalComplete, totalTasks) + '/' + formatPercent(task.progress, task.denominator) + "] " + task.description);
   }
 

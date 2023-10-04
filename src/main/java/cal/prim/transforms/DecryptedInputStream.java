@@ -2,6 +2,7 @@ package cal.prim.transforms;
 
 import cal.bkup.Util;
 import es.vocali.util.AESCrypt;
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -14,7 +15,8 @@ public class DecryptedInputStream extends FilterInputStream {
     return Util.read(new DecryptedInputStream(s, password));
   }
 
-  public DecryptedInputStream(InputStream wrappedStream, String password) {
+  @SuppressWarnings("mustcallalias.out.of.scope") // TODO?
+  public @MustCallAlias DecryptedInputStream(@MustCallAlias InputStream wrappedStream, String password) {
     super(Util.createInputStream(out -> {
       try (InputStream copy = wrappedStream /* ensure wrappedStream is closed */) {
         AESCrypt crypt = new AESCrypt(password);

@@ -2,6 +2,7 @@ package cal.prim;
 
 import cal.bkup.Util;
 import cal.prim.time.MonotonicRealTimeClock;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.math.BigInteger;
 import java.time.Duration;
@@ -21,7 +22,7 @@ public class RateLimitedRunnable implements Runnable {
 
   private final MonotonicRealTimeClock clock;
   private final Duration rateLimit;
-  private BigInteger lastRun;
+  private @Nullable BigInteger lastRun;
   private final Runnable wrapped;
 
   public RateLimitedRunnable(Duration rateLimit, Mode mode, Runnable wrapped) {

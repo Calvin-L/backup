@@ -77,10 +77,14 @@ public class BackupTests {
       for (var p : index.knownPaths(sys)) {
         for (var rev : index.getInfo(sys, p)) {
           if (rev instanceof BackupIndex.RegularFileRev f) {
-              Assert.assertNotNull(blobDir.open(index.lookupBlob(f.summary()).idAtTarget()));
-              Assert.assertNotNull(index.lookupBlob(f.summary()));
+            var blobInfo = index.lookupBlob(f.summary());
+            if (blobInfo == null) {
+              throw new RuntimeException("Missing blob info for " + f);
+            }
+            Assert.assertNotNull(blobDir.open(blobInfo.idAtTarget()));
+            Assert.assertNotNull(index.lookupBlob(f.summary()));
           } else if (rev instanceof BackupIndex.HardLinkRev l) {
-              Assert.assertNotNull(index.resolveHardLinkTarget(sys, l));
+            Assert.assertNotNull(index.resolveHardLinkTarget(sys, l));
           }
         }
       }

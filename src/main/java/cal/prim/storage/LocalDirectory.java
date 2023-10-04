@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.stream.Stream;
 
 public class LocalDirectory implements EventuallyConsistentDirectory {
@@ -24,7 +25,11 @@ public class LocalDirectory implements EventuallyConsistentDirectory {
 
   @Override
   public Stream<String> list() throws IOException {
-    return Files.list(dir).map(p -> p.getFileName().toString());
+    List<String> result;
+    try (Stream<Path> entries = Files.list(dir)) {
+      result = entries.map(Path::toString).toList();
+    }
+    return result.stream();
   }
 
   @Override

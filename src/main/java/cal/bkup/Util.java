@@ -4,6 +4,9 @@ import cal.bkup.types.Sha256AndSize;
 import cal.prim.IOConsumer;
 import cal.prim.QuietAutoCloseable;
 import cal.prim.transforms.StatisticsCollectingInputStream;
+import org.checkerframework.checker.mustcall.qual.MustCall;
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -49,6 +52,7 @@ public abstract class Util {
   /**
    * A thread-local byte array of {@link #SUGGESTED_BUFFER_SIZE} bytes.
    */
+  @SuppressWarnings("type.argument")
   private static final ThreadLocal<byte[]> MEM_BUFFER = ThreadLocal.withInitial(() -> new byte[SUGGESTED_BUFFER_SIZE]);
 
   public static long copyStream(InputStream in, OutputStream out) throws IOException {
@@ -74,13 +78,13 @@ public abstract class Util {
     return md;
   }
 
-  public static Sha256AndSize summarize(InputStream in, Consumer<StatisticsCollectingInputStream> progressCallback) throws IOException {
+  public static Sha256AndSize summarize(InputStream in, Consumer<@MustCall({}) StatisticsCollectingInputStream> progressCallback) throws IOException {
     StatisticsCollectingInputStream s = new StatisticsCollectingInputStream(in, progressCallback);
     drain(s);
     return new Sha256AndSize(s.getSha256Digest(), s.getBytesRead());
   }
 
-  public static BufferedInputStream buffered(InputStream in) {
+  public static @MustCallAlias BufferedInputStream buffered(@MustCallAlias InputStream in) {
     return new BufferedInputStream(in, SUGGESTED_BUFFER_SIZE);
   }
 
@@ -91,7 +95,7 @@ public abstract class Util {
     }
   }
 
-  public static String readPassword(String prompt) {
+  public static @Nullable String readPassword(String prompt) {
     Console cons = System.console();
     if (cons == null) {
       throw new IllegalStateException("not connected to console");
@@ -194,10 +198,11 @@ public abstract class Util {
     return sum;
   }
 
-  public static InputStream createInputStream(IOConsumer<OutputStream> writer) {
+  public static InputStream createInputStream(IOConsumer<@MustCall({}) OutputStream> writer) {
+    @SuppressWarnings("required.method.not.called") // TODO
     PipedInputStream in = new PipedInputStream(SUGGESTED_BUFFER_SIZE);
     CountDownLatch gate = new CountDownLatch(1);
-    AtomicReference<Exception> err = new AtomicReference<>(null);
+    AtomicReference<@Nullable Exception> err = new AtomicReference<>(null);
 
     Thread t = new Thread(() -> {
       try (PipedOutputStream out = new PipedOutputStream(in)) {

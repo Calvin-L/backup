@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+@SuppressWarnings({"initialization.field.uninitialized", "dereference.of.nullable"}) // TODO
 public class JsonIndexFormatV01 implements IndexFormat {
 
   private final Instant UNKNOWN_TIME = Instant.EPOCH;

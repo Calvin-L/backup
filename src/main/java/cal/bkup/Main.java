@@ -47,6 +47,8 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.math3.fraction.BigFraction;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.glacier.GlacierClient;
@@ -223,7 +225,9 @@ public class Main {
       var registerLocation = Paths.get("/tmp/backup/register.db");
       StringRegister register = null;
       try {
-        register = new SQLiteStringRegister(registerLocation);
+        @SuppressWarnings("required.method.not.called") // TODO
+        var r = new SQLiteStringRegister(registerLocation);
+        register = r;
       } catch (SQLException e) {
         System.err.println("Failed to create SQLiteStringRegister at " + registerLocation);
         e.printStackTrace();
@@ -402,12 +406,12 @@ public class Main {
       return false;
     }
     String input = cons.readLine("%s [y/n] ", prompt);
-    return input.length() > 0 && Character.toLowerCase(input.charAt(0)) == 'y';
+    return input != null && !input.isEmpty() && Character.toLowerCase(input.charAt(0)) == 'y';
   }
 
   private static class RawConfig {
-    public String system;
-    public List<String> rules;
+    public @Nullable String system;
+    public @Nullable List<String> rules;
   }
 
   private static Config loadConfig(Path target) throws IOException {
@@ -421,14 +425,22 @@ public class Main {
       r = mapper.readValue(in, RawConfig.class);
     }
 
+    if (r.system == null) {
+      throw new IllegalArgumentException("Config at " + target + " is missing \"system\"");
+    }
+
     SystemId systemId = new SystemId(r.system);
     Pattern p = Pattern.compile("^(.) (.*)$");
     List<Rule> rules = new ArrayList<>();
-    for (String rule : r.rules) {
+    for (String rule : r.rules != null ? r.rules : Collections.<String>emptyList()) {
       Matcher m = p.matcher(rule);
       if (m.find()) {
+        @SuppressWarnings("dereference.of.nullable") // group(1) always present
         char c = m.group(1).charAt(0);
-        String ruleText = m.group(2);
+
+        @SuppressWarnings("assignment") // group(2) always present
+        @NonNull String ruleText = m.group(2);
+
         if (ruleText.startsWith("~")) {
           ruleText = ruleText.replaceFirst(Pattern.quote("~"), HOME);
         }

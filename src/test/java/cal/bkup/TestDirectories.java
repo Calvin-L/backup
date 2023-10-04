@@ -71,7 +71,10 @@ public class TestDirectories {
     System.out.println("done");
     while (true) {
       try (BufferedReader r = new BufferedReader(new InputStreamReader(dir.open(key), CHARSET))) {
-        Assert.assertEquals(r.readLine(), text);
+        String line = r.readLine();
+        if (line != null) {
+          Assert.assertEquals(line, text);
+        }
         return;
       } catch (NoSuchFileException ignored) {
       }

@@ -51,25 +51,30 @@ public class PhysicalFilesystem implements Filesystem {
   }
 
   private static abstract class Visitor implements FileVisitor<Path> {
-    private Set<PathMatcher> exclusionRules;
+    private final Set<PathMatcher> exclusionRules;
 
     Visitor(Set<PathMatcher> exclusionRules) {
       this.exclusionRules = exclusionRules;
     }
 
     @Override
-    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-      return exclusionRules.stream().anyMatch(r -> r.matches(dir) || r.matches(dir.getFileName())) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+    public FileVisitResult preVisitDirectory(Path dirPath, BasicFileAttributes attrs) {
+      Path dirName = dirPath.getFileName();
+      return exclusionRules.stream().anyMatch(r -> r.matches(dirPath) || (dirName != null && r.matches(dirName))) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
     }
 
     @Override
-    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-      if (exclusionRules.stream().allMatch(r -> !r.matches(file) && !r.matches(file.getFileName()))) {
+    public FileVisitResult visitFile(Path filePath, BasicFileAttributes attrs) throws IOException {
+      Path fileName = filePath.getFileName();
+      if (fileName == null) {
+        throw new IllegalArgumentException("No filename for path " + filePath);
+      }
+      if (exclusionRules.stream().allMatch(r -> !r.matches(filePath) && !r.matches(fileName))) {
         if (attrs.isSymbolicLink()) {
-          Path dst = Files.readSymbolicLink(file);
-          onSymLink(file, dst);
+          Path dst = Files.readSymbolicLink(filePath);
+          onSymLink(filePath, dst);
         } else {
-          onFile(file, attrs);
+          onFile(filePath, attrs);
         }
       }
       return FileVisitResult.CONTINUE;

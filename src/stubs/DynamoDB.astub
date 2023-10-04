@@ -1,0 +1,16 @@
+package software.amazon.awssdk.services.dynamodb.model;
+
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.checkerframework.common.returnsreceiver.qual.This;
+
+public final class PutItemRequest {
+    static interface Builder {
+        @This Builder expressionAttributeValues(@Nullable Map<String, AttributeValue> expressionAttributeValues);
+    }
+}
+
+public final class DeleteItemRequest {
+    static interface Builder {
+        @This Builder expressionAttributeValues(@Nullable Map<String, AttributeValue> expressionAttributeValues);
+    }
+}
