@@ -157,9 +157,9 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
       ListJobsResponse res = client.listJobs(ListJobsRequest.builder().vaultName(vaultName).build());
       for (GlacierJobDescription job : res.jobList()) {
         // TODO: proper handling for the ARN
-        if (job.action().equals(ActionCode.INVENTORY_RETRIEVAL) &&
+        if (job.action() == ActionCode.INVENTORY_RETRIEVAL &&
                 job.vaultARN().contains(vaultName) &&
-                !job.statusCode().equals(StatusCode.FAILED)) {
+                job.statusCode() != StatusCode.FAILED) {
           jobId = job.jobId();
           complete = job.completed();
           System.out.println("Found job " + jobId + " [complete=" + complete + ']');
@@ -195,7 +195,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
                 .build());
 
         System.out.println("status=" + jobInfo.statusCode());
-        if (jobInfo.statusCode().equals(StatusCode.FAILED)) {
+        if (jobInfo.statusCode() == StatusCode.FAILED) {
           throw new IOException("job " + jobId + " failed");
         }
 
@@ -301,7 +301,7 @@ public class GlacierBlobStore implements EventuallyConsistentBlobStore {
               .jobId(jobId)
               .build());
 
-      if (jobInfo.statusCode().equals(StatusCode.FAILED)) {
+      if (jobInfo.statusCode() == StatusCode.FAILED) {
         throw new IOException("job " + jobId + " failed");
       }
 

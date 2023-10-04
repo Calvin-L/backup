@@ -28,7 +28,7 @@ public class RateLimitedRunnable implements Runnable {
   public RateLimitedRunnable(Duration rateLimit, Mode mode, Runnable wrapped) {
     this.clock = MonotonicRealTimeClock.SYSTEM_CLOCK;
     this.rateLimit = rateLimit;
-    this.lastRun = mode.equals(Mode.DELAY_FIRST_RUN) ? clock.sample() : null;
+    this.lastRun = mode == Mode.DELAY_FIRST_RUN ? clock.sample() : null;
     this.wrapped = wrapped;
   }
 

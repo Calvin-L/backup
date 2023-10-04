@@ -176,18 +176,6 @@ public class BackupIndex {
             .orElseThrow(() -> new IllegalStateException("Hard link " + hardLink + " has no target"));
   }
 
-  public synchronized List<HardLinkRev> findHardLinksPointingTo(SystemId system, Path path, long revisionNumber) {
-    List<HardLinkRev> result = new ArrayList<>();
-    for (Path p : knownPaths(system)) {
-      for (Revision r : getInfo(system, p)) {
-        if (r instanceof HardLinkRev l && l.target() == path && resolveHardLinkTarget(system, l).backupNumber() == revisionNumber) {
-          result.add(l);
-        }
-      }
-    }
-    return result;
-  }
-
   private <T> T lastEntry(List<T> list) {
     return list.get(list.size() - 1);
   }
@@ -201,7 +189,7 @@ public class BackupIndex {
   }
 
   public synchronized void forgetRevision(SystemId system, Path path, Revision revision) {
-    if (revision == mostRecentRevision(system, path) && !(revision instanceof TombstoneRev)) {
+    if (revision.equals(mostRecentRevision(system, path)) && !(revision instanceof TombstoneRev)) {
       throw new IllegalArgumentException("Can't forget most recent revision!");
     }
     Map<Path, List<Revision>> info = files.get(system);
