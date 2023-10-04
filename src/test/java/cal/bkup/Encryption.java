@@ -3,6 +3,8 @@ package cal.bkup;
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.EncryptedInputStream;
 import es.vocali.util.AESCrypt;
+import org.checkerframework.checker.mustcall.qual.MustCall;
+import org.checkerframework.checker.mustcall.qual.MustCallAlias;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -23,8 +25,8 @@ public class Encryption {
 
   static void convertAndDeconvert(
       String text,
-      Function<InputStream, InputStream> inProvider,
-      Function<InputStream, InputStream> outProvider) throws IOException {
+      Function<@MustCall({}) InputStream, @MustCall({}) InputStream> inProvider,
+      Function<@MustCall({}) InputStream, @MustCall({}) InputStream> outProvider) throws IOException {
 
     byte[] inBytes = text.getBytes();
 
@@ -123,8 +125,8 @@ public class Encryption {
     } while (data.length() < 1024 * 1024 * 2);
   }
 
-  private class SlowStream extends FilterInputStream {
-    public SlowStream(InputStream stream) { super(stream); }
+  private static class SlowStream extends FilterInputStream {
+    public @MustCallAlias SlowStream(@MustCallAlias InputStream stream) { super(stream); }
 
     @Override
     public int read(byte[] b) throws IOException {

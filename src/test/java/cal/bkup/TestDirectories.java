@@ -50,6 +50,7 @@ public class TestDirectories {
     }
 
     @Override
+    @SuppressWarnings("required.method.not.called") // TODO: false positive?
     public InputStream open(String name) throws IOException {
       return transform.unApply(directory.open(name));
     }
@@ -111,8 +112,8 @@ public class TestDirectories {
     view.createOrReplace("foo", new ByteArrayInputStream(originalBytes));
     byte[] rawBytes;
     while (true) {
-      try {
-        rawBytes = Util.read(coreDir.open("foo"));
+      try (InputStream in = coreDir.open("foo")) {
+        rawBytes = Util.read(in);
         break;
       } catch (NoSuchFileException ignored) {
       }

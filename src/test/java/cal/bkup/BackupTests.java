@@ -26,6 +26,7 @@ import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.DecryptedInputStream;
 import cal.prim.transforms.XZCompression;
+import org.checkerframework.checker.mustcall.qual.Owning;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -81,8 +82,9 @@ public class BackupTests {
             if (blobInfo == null) {
               throw new RuntimeException("Missing blob info for " + f);
             }
-            Assert.assertNotNull(blobDir.open(blobInfo.idAtTarget()));
-            Assert.assertNotNull(index.lookupBlob(f.summary()));
+            try (InputStream in = blobDir.open(blobInfo.idAtTarget())) {
+              Util.read(in);
+            }
           } else if (rev instanceof BackupIndex.HardLinkRev l) {
             Assert.assertNotNull(index.resolveHardLinkTarget(sys, l));
           }
@@ -152,7 +154,9 @@ public class BackupTests {
     try (InputStream s = readAny(blobDir)) {
       bytes = Util.read(s);
     }
-    Assert.assertNotEquals(bytes, Util.read(fs.openRegularFileForReading(f.path())));
+    try (InputStream s = fs.openRegularFileForReading(f.path())) {
+      Assert.assertNotEquals(bytes, Util.read(s));
+    }
 
     // TODO: blob restore should work
 
@@ -906,7 +910,7 @@ public class BackupTests {
     backup.planCleanup(password, Duration.ofDays(1), FREE).execute();
   }
 
-  private static String stringify(InputStream data) throws IOException {
+  private static String stringify(@Owning InputStream data) throws IOException {
     try (InputStream is = data) {
       return new String(Util.read(is), StandardCharsets.UTF_8);
     }

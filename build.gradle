@@ -17,7 +17,7 @@ checkerFramework {
     "org.checkerframework.checker.nullness.NullnessChecker",
     // "org.checkerframework.checker.interning.InterningChecker",
     // "org.checkerframework.checker.regex.RegexChecker",
-    // "org.checkerframework.checker.resourceleak.ResourceLeakChecker",
+    "org.checkerframework.checker.resourceleak.ResourceLeakChecker",
   ]
   extraJavacArgs = [
     "-Astubs=${projectDir}/src/stubs/",

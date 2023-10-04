@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @Test
+@SuppressWarnings("required.method.not.called")
 public class VersionedIndexFormatTests {
 
   @Test

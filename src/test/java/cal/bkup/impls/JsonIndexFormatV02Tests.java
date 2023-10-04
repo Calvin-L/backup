@@ -9,6 +9,7 @@ import org.testng.annotations.Test;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
+@SuppressWarnings("required.method.not.called")
 public class JsonIndexFormatV02Tests {
 
   private final IndexFormat FORMAT = new JsonIndexFormatV02();

@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.HashSet;
 
 @Test
+@SuppressWarnings("required.method.not.called")
 public class JsonIndexFormatV01Tests {
 
   private final IndexFormat FORMAT = new JsonIndexFormatV01();
