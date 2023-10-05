@@ -133,72 +133,10 @@ public class Main {
   }
 
   public static void main(String[] args) throws IOException {
-    Options options = new Options();
+    var flags = parseCLIFlags(args);
 
-    // flags
-    options.addOption("h", "help", false, "Show help and quit");
-    options.addOption("p", "password", true, "Decryption password");
-    options.addOption("P", "new-password", true, "Encryption password (defaults to the decryption password; prompts if you give an empty argument)");
-    options.addOption("L", "local", false, "Local backup to /tmp (for testing)");
-    options.addOption("d", "dry-run", false, "Show what would be done, but do nothing");
-
-    // actions
-    options.addOption("b", "backup", false, "Back up files");
-    options.addOption("l", "list", false, "Show inventory of current backup");
-    options.addOption("c", "spot-check", true, "Spot-check N backed-up files");
-    options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
-    options.addOption(Option.builder().longOpt("dump-index").desc("Dump the raw index (for debugging or recovery)").build());
-    options.addOption("t", "test", false, "Do a quick check of AWS actions (costs money, may leave behind some garbage)");
-
-    CommandLine cli;
-    try {
-      cli = new DefaultParser().parse(options, args);
-    } catch (ParseException e) {
-      System.err.println("Failed to parse options: " + e);
-      showHelp(options);
-      System.exit(1);
+    if (flags == null) {
       return;
-    }
-
-    if (cli.hasOption('h')) {
-      showHelp(options);
-      return;
-    }
-
-    final boolean dryRun = cli.hasOption('d');
-    final boolean list = cli.hasOption('l');
-    final boolean gc = cli.hasOption("gc");
-    final boolean backup = cli.hasOption("backup");
-    final boolean dumpIndex = cli.hasOption("dump-index");
-    final boolean local = cli.hasOption("local");
-    final int numToCheck = cli.hasOption('c') ? Integer.parseInt(cli.getOptionValue('c')) : 0;
-    final boolean test = cli.hasOption('t');
-
-    if (!backup && !list && numToCheck == 0 && !gc && !dumpIndex && !test) {
-      System.err.println("No action specified. Did you mean to pass '-b'?");
-      return;
-    }
-
-    final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword("Password");
-    String newPassword = password;
-    if (cli.hasOption('P')) {
-      if (cli.getOptionValue('P').isEmpty()) {
-        newPassword = Util.readPassword("New password");
-        if (newPassword != null && !Util.confirmPassword(newPassword)) {
-          newPassword = null;
-        }
-      } else {
-        newPassword = cli.getOptionValue('P');
-      }
-    }
-
-    if (password == null || newPassword == null) {
-      System.err.println("No password; refusing to proceed");
-      System.exit(1);
-    }
-
-    if (!Objects.equals(password, newPassword) && !backup) {
-      System.err.println("WARNING: a new password was specified without '-b'; the new password will be ignored.");
     }
 
     // ------------------------------------------------------------------------------
@@ -223,66 +161,157 @@ public class Main {
     final BackerUpper backupper;
     final UnreliableWallClock clock = UnreliableWallClock.SYSTEM_CLOCK;
 
-    if (local) {
+    if (flags.local) {
       var registerLocation = Paths.get("/tmp/backup/register.db");
-      StringRegister register = null;
-      try {
-        @SuppressWarnings("required.method.not.called") // TODO
-        var r = new SQLiteStringRegister(registerLocation);
-        register = r;
+      try (var register = new SQLiteStringRegister(registerLocation)) {
+        EventuallyConsistentDirectory dir = new LocalDirectory(Paths.get("/tmp/backup/indexes"));
+        ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
+        EventuallyConsistentBlobStore blobStore = new BlobStoreOnDirectory(new LocalDirectory(Paths.get("/tmp/backup/blobs")));
+        backupper = new BackerUpper(
+                indexStore, indexFormat,
+                blobStore, transform,
+                clock);
+        run(backupper, config, flags);
       } catch (SQLException e) {
         System.err.println("Failed to create SQLiteStringRegister at " + registerLocation);
         e.printStackTrace();
         System.exit(1);
       }
-      EventuallyConsistentDirectory dir = new LocalDirectory(Paths.get("/tmp/backup/indexes"));
-      ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
-      EventuallyConsistentBlobStore blobStore = new BlobStoreOnDirectory(new LocalDirectory(Paths.get("/tmp/backup/blobs")));
-      backupper = new BackerUpper(
-              indexStore, indexFormat,
-              blobStore, transform,
-              clock);
     } else {
-      @SuppressWarnings("required.method.not.called") // TODO
-      var credentials = AWSTools.credentialsProvider();
+      try (var credentials = AWSTools.credentialsProvider();
+           var dynamoClient = DynamoDbClient.builder()
+                .credentialsProvider(credentials)
+                .region(AWS_REGION)
+                .build();
+           var s3Client = S3Client.builder()
+                .credentialsProvider(credentials)
+                .region(AWS_REGION)
+                .build();
+           var glacierClient = GlacierClient.builder()
+                .credentialsProvider(credentials)
+                .region(AWS_REGION)
+                .build()) {
 
-      @SuppressWarnings("required.method.not.called") // TODO
-      StringRegister register = new DynamoDBStringRegister(
-              DynamoDbClient.builder()
-                      .credentialsProvider(credentials)
-                      .region(AWS_REGION)
-                      .build(),
-              DYNAMO_TABLE,
-              DYNAMO_REGISTER);
+        StringRegister register = new DynamoDBStringRegister(
+            dynamoClient,
+            DYNAMO_TABLE,
+            DYNAMO_REGISTER);
 
-      @SuppressWarnings("required.method.not.called") // TODO
-      EventuallyConsistentDirectory dir = new S3Directory(
-              S3Client.builder()
-                      .credentialsProvider(credentials)
-                      .region(AWS_REGION)
-                      .build(),
-              S3_BUCKET);
+        EventuallyConsistentDirectory dir = new S3Directory(
+            s3Client,
+            S3_BUCKET);
 
-      ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
+        ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
 
-      @SuppressWarnings("required.method.not.called") // TODO
-      EventuallyConsistentBlobStore blobStore = new GlacierBlobStore(
-              GlacierClient.builder()
-                      .credentialsProvider(credentials)
-                      .region(AWS_REGION)
-                      .build(),
-              GLACIER_VAULT_NAME);
+        EventuallyConsistentBlobStore blobStore = new GlacierBlobStore(
+            glacierClient,
+            GLACIER_VAULT_NAME);
 
-      backupper = new BackerUpper(
-              indexStore, indexFormat,
-              blobStore, transform,
-              clock);
+        backupper = new BackerUpper(
+            indexStore, indexFormat,
+            blobStore, transform,
+            clock);
+
+        run(backupper, config, flags);
+      }
+    }
+  }
+
+  private static class WhatToDo {
+    boolean dryRun;
+    boolean list;
+    boolean gc;
+    boolean backup;
+    boolean dumpIndex;
+    boolean local;
+    int numToCheck;
+    boolean test;
+    String password = "";
+    String newPassword = "";
+  }
+
+  private static @Nullable WhatToDo parseCLIFlags(String... args) {
+    Options options = new Options();
+
+    // flags
+    options.addOption("h", "help", false, "Show help and quit");
+    options.addOption("p", "password", true, "Decryption password");
+    options.addOption("P", "new-password", true, "Encryption password (defaults to the decryption password; prompts if you give an empty argument)");
+    options.addOption("L", "local", false, "Local backup to /tmp (for testing)");
+    options.addOption("d", "dry-run", false, "Show what would be done, but do nothing");
+
+    // actions
+    options.addOption("b", "backup", false, "Back up files");
+    options.addOption("l", "list", false, "Show inventory of current backup");
+    options.addOption("c", "spot-check", true, "Spot-check N backed-up files");
+    options.addOption(Option.builder().longOpt("gc").desc("Delete old/unused backups").build());
+    options.addOption(Option.builder().longOpt("dump-index").desc("Dump the raw index (for debugging or recovery)").build());
+    options.addOption("t", "test", false, "Do a quick check of AWS actions (costs money, may leave behind some garbage)");
+
+    CommandLine cli;
+    try {
+      cli = new DefaultParser().parse(options, args);
+    } catch (ParseException e) {
+      System.err.println("Failed to parse options: " + e);
+      showHelp(options);
+      System.exit(1);
+      return null;
     }
 
-    // ------------------------------------------------------------------------------
-    // Do the work
+    if (cli.hasOption('h')) {
+      showHelp(options);
+      return null;
+    }
 
-    if (test) {
+    WhatToDo result = new WhatToDo();
+    result.dryRun = cli.hasOption('d');
+    result.list = cli.hasOption('l');
+    result.gc = cli.hasOption("gc");
+    result.backup = cli.hasOption("backup");
+    result.dumpIndex = cli.hasOption("dump-index");
+    result.local = cli.hasOption("local");
+    result.numToCheck = cli.hasOption('c') ? Integer.parseInt(cli.getOptionValue('c')) : 0;
+    result.test = cli.hasOption('t');
+
+    if (!result.backup && !result.list && result.numToCheck == 0 && !result.gc && !result.dumpIndex && !result.test) {
+      System.err.println("No action specified. Did you mean to pass '-b'?");
+      return null;
+    }
+
+    final String password = cli.hasOption('p') ? cli.getOptionValue('p') : Util.readPassword("Password");
+    String newPassword = password;
+    if (cli.hasOption('P')) {
+      if (cli.getOptionValue('P').isEmpty()) {
+        newPassword = Util.readPassword("New password");
+        if (newPassword != null && !Util.confirmPassword(newPassword)) {
+          newPassword = null;
+        }
+      } else {
+        newPassword = cli.getOptionValue('P');
+      }
+    }
+
+    if (password == null || newPassword == null) {
+      System.err.println("No password; refusing to proceed");
+      System.exit(1);
+      return null;
+    }
+
+    if (!Objects.equals(password, newPassword) && !result.backup) {
+      System.err.println("WARNING: a new password was specified without '-b'; the new password will be ignored.");
+    }
+
+    result.password = password;
+    result.newPassword = newPassword;
+
+    return result;
+  }
+
+  private static void run(BackerUpper backupper, Config config, WhatToDo flags) throws IOException {
+    String password = flags.password;
+    String newPassword = flags.newPassword;
+
+    if (flags.test) {
       try (var credentials = AWSTools.credentialsProvider();
            var client = DynamoDbClient.builder()
                 .credentialsProvider(credentials)
@@ -304,7 +333,7 @@ public class Main {
       System.out.println("Test OK");
     }
 
-    if (backup) {
+    if (flags.backup) {
       System.out.println("Scanning filesystem...");
       List<SymLink> symlinks = new ArrayList<>();
       List<HardLink> hardlinks = new ArrayList<>();
@@ -317,7 +346,7 @@ public class Main {
       System.out.println("  uploaded bytes:      " + Util.formatSize(plan.estimatedBytesUploaded()));
       System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
       System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
-      if (!dryRun && confirm("Proceed?")) {
+      if (!flags.dryRun && confirm("Proceed?")) {
         try {
           plan.execute(fs);
         } catch (BackupIndex.MergeConflict mergeConflict) {
@@ -329,13 +358,13 @@ public class Main {
       }
     }
 
-    if (list) {
+    if (flags.list) {
       backupper.list(newPassword).forEach(info -> {
         System.out.println('[' + info.system().toString() + "] " + info.latestRevision() + ": " + info.path());
       });
     }
 
-    if (gc) {
+    if (flags.gc) {
       System.out.println("Planning cleanup...");
       BackerUpper.CleanupPlan plan = backupper.planCleanup(password, Duration.ofDays(60), COST_MODEL);
       System.out.println("Estimated costs:");
@@ -343,7 +372,7 @@ public class Main {
       System.out.println("  reclaimed bytes:     " + Util.formatSize(plan.bytesReclaimed()));
       System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
       System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
-      if (!dryRun && confirm("Proceed?")) {
+      if (!flags.dryRun && confirm("Proceed?")) {
         try {
           plan.execute();
         } catch (BackupIndex.MergeConflict mergeConflict) {
@@ -353,7 +382,7 @@ public class Main {
       }
     }
 
-    if (dumpIndex) {
+    if (flags.dumpIndex) {
       try (InputStream in = new BufferedInputStream(backupper.readRawIndex(newPassword))) {
         Util.copyStream(in, System.out);
       } catch (NoValue noValue) {
@@ -364,7 +393,7 @@ public class Main {
       }
     }
 
-    if (numToCheck > 0) {
+    if (flags.numToCheck > 0) {
       List<Pair<Path, Sha256AndSize>> candidates = backupper.list(newPassword)
               .filter(item -> item.system().equals(config.systemName()))
               .filter(item -> item.latestRevision() instanceof BackupIndex.RegularFileRev)
@@ -372,7 +401,7 @@ public class Main {
               .collect(Collectors.toList());
       Random random = new Random();
       Collections.shuffle(candidates, random);
-      int len = Math.min(numToCheck, candidates.size());
+      int len = Math.min(flags.numToCheck, candidates.size());
       List<Sha256AndSize> localSummaries = new ArrayList<>();
       List<Sha256AndSize> remoteSummaries = new ArrayList<>();
       try (ProgressDisplay display = new ProgressDisplay(len)) {
@@ -405,7 +434,6 @@ public class Main {
         System.exit(1);
       }
     }
-
   }
 
   private static boolean confirm(String prompt) {
