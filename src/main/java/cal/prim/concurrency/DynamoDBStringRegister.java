@@ -67,10 +67,11 @@ public class DynamoDBStringRegister implements StringRegister {
 
     if (wasCreated) {
       System.out.println("Waiting for DynamoDB table `" + tableName + "`...");
-      DynamoDbWaiter waiter = client.waiter();
-      waiter.waitUntilTableExists(DescribeTableRequest.builder()
-              .tableName(tableName)
-              .build());
+      try (DynamoDbWaiter waiter = client.waiter()) {
+        waiter.waitUntilTableExists(DescribeTableRequest.builder()
+            .tableName(tableName)
+            .build());
+      }
     }
 
     this.client = client;

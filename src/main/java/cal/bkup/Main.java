@@ -243,8 +243,10 @@ public class Main {
               blobStore, transform,
               clock);
     } else {
+      @SuppressWarnings("required.method.not.called") // TODO
       var credentials = AWSTools.credentialsProvider();
 
+      @SuppressWarnings("required.method.not.called") // TODO
       StringRegister register = new DynamoDBStringRegister(
               DynamoDbClient.builder()
                       .credentialsProvider(credentials)
@@ -253,6 +255,7 @@ public class Main {
               DYNAMO_TABLE,
               DYNAMO_REGISTER);
 
+      @SuppressWarnings("required.method.not.called") // TODO
       EventuallyConsistentDirectory dir = new S3Directory(
               S3Client.builder()
                       .credentialsProvider(credentials)
@@ -262,6 +265,7 @@ public class Main {
 
       ConsistentBlob indexStore = new ConsistentBlobOnEventuallyConsistentDirectory(register, dir);
 
+      @SuppressWarnings("required.method.not.called") // TODO
       EventuallyConsistentBlobStore blobStore = new GlacierBlobStore(
               GlacierClient.builder()
                       .credentialsProvider(credentials)
@@ -279,21 +283,23 @@ public class Main {
     // Do the work
 
     if (test) {
-      var credentials = AWSTools.credentialsProvider();
-      StringRegister register = new DynamoDBStringRegister(
-              DynamoDbClient.builder()
-                      .credentialsProvider(credentials)
-                      .region(AWS_REGION)
-                      .build(),
-              DYNAMO_TABLE,
-              DYNAMO_REGISTER + ".tmp");
-      String val = register.read();
-      try {
-        register.write(val, "test-value");
-        register.write("test-value", "");
-      } catch (PreconditionFailed exn) {
-        System.err.println("Test failed due to concurrent interference: " + exn.getMessage());
-        return;
+      try (var credentials = AWSTools.credentialsProvider();
+           var client = DynamoDbClient.builder()
+                .credentialsProvider(credentials)
+                .region(AWS_REGION)
+                .build()) {
+        StringRegister register = new DynamoDBStringRegister(
+            client,
+            DYNAMO_TABLE,
+            DYNAMO_REGISTER + ".tmp");
+        String val = register.read();
+        try {
+          register.write(val, "test-value");
+          register.write("test-value", "");
+        } catch (PreconditionFailed exn) {
+          System.err.println("Test failed due to concurrent interference: " + exn.getMessage());
+          return;
+        }
       }
       System.out.println("Test OK");
     }
