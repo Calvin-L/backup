@@ -2,7 +2,9 @@ package cal.prim.storage;
 
 import cal.bkup.AWSTools;
 import cal.bkup.Util;
+import org.checkerframework.checker.interning.qual.UnknownInterned;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import org.checkerframework.checker.regex.qual.UnknownRegex;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -75,8 +77,7 @@ public class S3Directory implements EventuallyConsistentDirectory {
       Iterator<S3Object> current = listing.contents().iterator();
 
       @Override
-      @SuppressWarnings("argument") // false positive?
-      public boolean tryAdvance(Consumer<? super String> action) {
+      public boolean tryAdvance(Consumer<? super @UnknownInterned @UnknownRegex String> action) {
         if (!current.hasNext() && listing.isTruncated()) {
           listing = s3client.listObjectsV2(request.toBuilder()
                   .continuationToken(listing.continuationToken())
