@@ -199,7 +199,6 @@ public abstract class Util {
   }
 
   public static InputStream createInputStream(IOConsumer<@MustCall({}) OutputStream> writer) {
-    @SuppressWarnings("required.method.not.called") // TODO
     PipedInputStream in = new PipedInputStream(SUGGESTED_BUFFER_SIZE);
     CountDownLatch gate = new CountDownLatch(1);
     AtomicReference<@Nullable Exception> err = new AtomicReference<>(null);
@@ -228,27 +227,38 @@ public abstract class Util {
       }
     }
 
-    return new FilterInputStream(in) {
-      @Override
-      public void close() throws IOException {
-        try {
+    return new CreateInputStreamHelper(in, t, err);
+  }
+
+  private static class CreateInputStreamHelper extends FilterInputStream {
+    private final Thread t;
+    private final AtomicReference<@Nullable Exception> err;
+
+    public @MustCallAlias CreateInputStreamHelper(@MustCallAlias InputStream in, Thread t, AtomicReference<@Nullable Exception> err) {
+      super(in);
+      this.t = t;
+      this.err = err;
+    }
+
+    @Override
+    public void close() throws IOException {
+      try {
 //          t.interrupt();
-          long dropped = Util.drain(this.in);
-          if (dropped > 0) {
-            System.err.println("Dropped " + dropped + " bytes");
-          }
-          t.join();
-          Exception e = err.get();
-          if (e != null) {
-            throw new IOException("byte producer failed", e);
-          }
-        } catch (InterruptedException e) {
-          throw new InterruptedIOException();
-        } finally {
-          super.close();
+        long dropped = Util.drain(this.in);
+        if (dropped > 0) {
+          System.err.println("Dropped " + dropped + " bytes");
         }
+        t.join();
+        Exception e = err.get();
+        if (e != null) {
+          throw new IOException("byte producer failed", e);
+        }
+      } catch (InterruptedException e) {
+        throw new InterruptedIOException();
+      } finally {
+        super.close();
       }
-    };
+    }
   }
 
   public static long drain(InputStream in) throws IOException {
