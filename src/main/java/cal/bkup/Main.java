@@ -6,6 +6,7 @@ import cal.bkup.impls.JsonIndexFormatV01;
 import cal.bkup.impls.JsonIndexFormatV02;
 import cal.bkup.impls.JsonIndexFormatV03;
 import cal.bkup.impls.JsonIndexFormatV04;
+import cal.bkup.impls.JsonIndexFormatV05;
 import cal.bkup.impls.ProgressDisplay;
 import cal.bkup.impls.VersionedIndexFormat;
 import cal.bkup.types.Config;
@@ -217,7 +218,8 @@ public class Main {
             new JsonIndexFormatV01(),
             new JsonIndexFormatV02(),
             new JsonIndexFormatV03(),
-            new JsonIndexFormatV04());
+            new JsonIndexFormatV04(),
+            new JsonIndexFormatV05());
     final BackerUpper backupper;
     final UnreliableWallClock clock = UnreliableWallClock.SYSTEM_CLOCK;
 
