@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@SuppressWarnings({"initialization.field.uninitialized", "argument", "dereference.of.nullable", "assignment"}) // TODO
+@SuppressWarnings({"initialization.field.uninitialized", "argument", "dereference.of.nullable", "assignment"})
 public class JsonIndexFormatV02 implements IndexFormat {
 
   private static class JsonBackupInfo {
