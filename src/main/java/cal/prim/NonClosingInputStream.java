@@ -1,5 +1,7 @@
 package cal.prim;
 
+import org.checkerframework.checker.mustcall.qual.NotOwning;
+
 import java.io.FilterInputStream;
 import java.io.InputStream;
 
@@ -11,7 +13,7 @@ import java.io.InputStream;
  */
 public class NonClosingInputStream extends FilterInputStream {
 
-  public NonClosingInputStream(InputStream in) {
+  public NonClosingInputStream(@NotOwning InputStream in) {
     super(in);
   }
 

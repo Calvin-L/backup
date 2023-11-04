@@ -71,7 +71,9 @@ public class TestDirectories {
     }
     System.out.println("done");
     while (true) {
-      try (BufferedReader r = new BufferedReader(new InputStreamReader(dir.open(key), CHARSET))) {
+      try (InputStream file = dir.open(key);
+           InputStreamReader rawReader = new InputStreamReader(file, CHARSET);
+           BufferedReader r = new BufferedReader(rawReader)) {
         String line = r.readLine();
         if (line != null) {
           Assert.assertEquals(line, text);

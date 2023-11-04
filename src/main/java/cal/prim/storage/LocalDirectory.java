@@ -4,7 +4,6 @@ import cal.bkup.Util;
 import org.crashsafeio.AtomicDurableOutputStream;
 import org.crashsafeio.DurableIOUtil;
 
-import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,7 +33,7 @@ public class LocalDirectory implements EventuallyConsistentDirectory {
 
   @Override
   public void createOrReplace(String name, InputStream data) throws IOException {
-    try (OutputStream out = new BufferedOutputStream(new AtomicDurableOutputStream(dir.resolve(name)))) {
+    try (OutputStream out = new AtomicDurableOutputStream(dir.resolve(name))) {
       Util.copyStream(data, out);
     }
   }

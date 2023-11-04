@@ -200,39 +200,49 @@ public abstract class Util {
 
   public static InputStream createInputStream(IOConsumer<@MustCall({}) OutputStream> writer) {
     PipedInputStream in = new PipedInputStream(SUGGESTED_BUFFER_SIZE);
-    CountDownLatch gate = new CountDownLatch(1);
-    AtomicReference<@Nullable Exception> err = new AtomicReference<>(null);
+    try {
+      CountDownLatch gate = new CountDownLatch(1);
+      AtomicReference<@Nullable Exception> err = new AtomicReference<>(null);
 
-    Thread t = new Thread(() -> {
-      try (PipedOutputStream out = new PipedOutputStream(in)) {
-        gate.countDown();
-        writer.accept(out);
-      } catch (Exception e) {
-        err.set(e);
-      } finally {
-        // If an exception was thrown constructing the PipedOutputStream,
-        // then unblock the waiting parent thread.
-        while (gate.getCount() > 0) {
+      Thread t = new Thread(() -> {
+        try (PipedOutputStream out = new PipedOutputStream(in)) {
           gate.countDown();
+          writer.accept(out);
+        } catch (Exception e) {
+          err.set(e);
+        } finally {
+          // If an exception was thrown constructing the PipedOutputStream,
+          // then unblock the waiting parent thread.
+          while (gate.getCount() > 0) {
+            gate.countDown();
+          }
+        }
+      });
+      t.start();
+
+      for (; ; ) {
+        try {
+          gate.await();
+          break;
+        } catch (InterruptedException ignored) {
         }
       }
-    });
-    t.start();
 
-    for (;;) {
+      return new CreateInputStreamHelper(in, t, err);
+    } catch (Exception e) {
       try {
-        gate.await();
-        break;
-      } catch (InterruptedException ignored) {
+        in.close();
+      } catch (Exception onClose) {
+        e.addSuppressed(onClose);
       }
+      throw e;
     }
-
-    return new CreateInputStreamHelper(in, t, err);
   }
 
   private static class CreateInputStreamHelper extends FilterInputStream {
     private final Thread t;
     private final AtomicReference<@Nullable Exception> err;
+    private boolean closed = false;
 
     public @MustCallAlias CreateInputStreamHelper(@MustCallAlias InputStream in, Thread t, AtomicReference<@Nullable Exception> err) {
       super(in);
@@ -243,19 +253,22 @@ public abstract class Util {
     @Override
     public void close() throws IOException {
       try {
+        if (!closed) {
 //          t.interrupt();
-        long dropped = Util.drain(this.in);
-        if (dropped > 0) {
-          System.err.println("Dropped " + dropped + " bytes");
-        }
-        t.join();
-        Exception e = err.get();
-        if (e != null) {
-          throw new IOException("byte producer failed", e);
+          long dropped = Util.drain(this.in);
+          if (dropped > 0) {
+            System.err.println("Dropped " + dropped + " bytes");
+          }
+          t.join();
+          Exception e = err.get();
+          if (e != null) {
+            throw new IOException("byte producer failed", e);
+          }
         }
       } catch (InterruptedException e) {
         throw new InterruptedIOException();
       } finally {
+        closed = true;
         super.close();
       }
     }

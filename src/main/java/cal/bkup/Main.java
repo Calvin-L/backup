@@ -383,7 +383,8 @@ public class Main {
     }
 
     if (flags.dumpIndex) {
-      try (InputStream in = new BufferedInputStream(backupper.readRawIndex(newPassword))) {
+      try (InputStream raw = backupper.readRawIndex(newPassword);
+           InputStream in = new BufferedInputStream(raw)) {
         Util.copyStream(in, System.out);
       } catch (NoValue noValue) {
         System.out.println("No backups have ever been made; there is no index.");
@@ -408,11 +409,13 @@ public class Main {
         for (int i = 0; i < len; ++i) {
           Path path = candidates.get(i).fst();
           ProgressDisplay.Task t = display.startTask("fetch " + path);
-          try (InputStream in = Util.buffered(Files.newInputStream(path))) {
+          try (InputStream raw = Files.newInputStream(path);
+               InputStream in = Util.buffered(raw)) {
             localSummaries.add(Util.summarize(in, s -> { }));
           }
           Sha256AndSize thing = candidates.get(i).snd();
-          try (InputStream in = Util.buffered(backupper.restore(newPassword, thing))) {
+          try (InputStream raw = backupper.restore(newPassword, thing);
+               InputStream in = Util.buffered(raw)) {
             remoteSummaries.add(Util.summarize(in, s -> display.reportProgress(t, s.getBytesRead(), thing.size())));
           }
           display.finishTask(t);

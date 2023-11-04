@@ -50,6 +50,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+@SuppressWarnings("required.method.not.called") // need https://github.com/typetools/checker-framework/pull/6271
 @Test
 public class BackupTests {
 
@@ -186,7 +187,9 @@ public class BackupTests {
     other.backup(system, password, newPassword, fs, Collections.singleton(f), Collections.emptyList(), Collections.emptyList(), toForget);
 
     // index is encrypted with new password
-    try (DecryptedInputStream s = new DecryptedInputStream(Util.buffered(indexStore.read(indexStore.head())), newPassword)) {
+    try (InputStream raw = indexStore.read(indexStore.head());
+         InputStream buffered = Util.buffered(raw);
+         DecryptedInputStream s = new DecryptedInputStream(buffered, newPassword)) {
       Util.drain(s);
     }
 

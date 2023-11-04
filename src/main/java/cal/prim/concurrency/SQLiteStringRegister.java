@@ -30,15 +30,26 @@ public class SQLiteStringRegister implements StringRegister, Closeable {
       DurableIOUtil.createDirectories(parent);
     }
 
-    conn = DriverManager.getConnection("jdbc:sqlite:" + filename.toAbsolutePath());
-    conn.setAutoCommit(false);
-    conn.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
+    Connection conn = DriverManager.getConnection("jdbc:sqlite:" + filename.toAbsolutePath());
+    try {
+      conn.setAutoCommit(false);
+      conn.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
 
-    try (Statement stmt = conn.createStatement()) {
-      stmt.executeUpdate("CREATE TABLE IF NOT EXISTS tbl (key INT PRIMARY KEY, value TEXT) WITHOUT ROWID");
-      stmt.executeUpdate("INSERT OR IGNORE INTO tbl (key, value) VALUES (0, \"\")");
+      try (Statement stmt = conn.createStatement()) {
+        stmt.executeUpdate("CREATE TABLE IF NOT EXISTS tbl (key INT PRIMARY KEY, value TEXT) WITHOUT ROWID");
+        stmt.executeUpdate("INSERT OR IGNORE INTO tbl (key, value) VALUES (0, \"\")");
+      }
+      conn.commit();
+    } catch (Exception e) {
+      try {
+        conn.close();
+      } catch (Exception onClose) {
+        e.addSuppressed(onClose);
+      }
+      throw e;
     }
-    conn.commit();
+
+    this.conn = conn;
   }
 
   @Override

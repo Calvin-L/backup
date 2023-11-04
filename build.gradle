@@ -21,6 +21,7 @@ checkerFramework {
   ]
   extraJavacArgs = [
     "-Astubs=${projectDir}/src/stubs/",
+    "-AresourceLeakIgnoredExceptions=java.lang.Error,java.lang.NullPointerException",
   ]
 }
 
@@ -35,7 +36,7 @@ repositories {
 }
 
 def aws_sdk_version = "2.20.157"
-def checker_framework_version = "3.39.0"
+def checker_framework_version = "3.40.0"
 
 dependencies {
     implementation project(":aes-crypt")

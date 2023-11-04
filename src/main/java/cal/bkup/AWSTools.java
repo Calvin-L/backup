@@ -15,7 +15,16 @@ public class AWSTools {
 
   public static CloseableCredentialsProvider credentialsProvider() {
     var credentials = DefaultCredentialsProvider.create();
-    return new CredentialsProviderWithResource(credentials, credentials);
+    try {
+      return new CredentialsProviderWithResource(credentials, credentials);
+    } catch (Exception e) {
+      try {
+        credentials.close();
+      } catch (Exception onClose) {
+        e.addSuppressed(onClose);
+      }
+      throw e;
+    }
   }
 
   public interface CloseableCredentialsProvider extends AwsCredentialsProvider, Closeable {

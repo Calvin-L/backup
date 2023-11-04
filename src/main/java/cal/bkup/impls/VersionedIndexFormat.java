@@ -133,10 +133,9 @@ public class VersionedIndexFormat implements IndexFormat {
       // final stream open until it is closed, and therefore may close it as the
       // last byte is consumed.  Since this procedure is expected NOT to close
       // the data stream, we first wrap it in a NonClosingInputStream.
-      try (InputStream sequence = new SequenceInputStream(
-              new ByteArrayInputStream(new byte[] { (byte)firstByte }),
-              new NonClosingInputStream(data)
-      )) {
+      try (ByteArrayInputStream firstByteStream = new ByteArrayInputStream(new byte[] { (byte)firstByte });
+           NonClosingInputStream restStream = new NonClosingInputStream(data);
+           InputStream sequence = new SequenceInputStream(firstByteStream, restStream)) {
         return oldestFormat().load(sequence);
       }
     }
@@ -144,9 +143,27 @@ public class VersionedIndexFormat implements IndexFormat {
 
   @Override
   public InputStream serialize(BackupIndex index) {
-    return new SequenceInputStream(
-            new ByteArrayInputStream(createHeader(numberOfNewestFormat())),
-            newestFormat().serialize(index));
+    ByteArrayInputStream headerStream = new ByteArrayInputStream(createHeader(numberOfNewestFormat()));
+    try {
+      InputStream indexStream = newestFormat().serialize(index);
+      try {
+        return new SequenceInputStream(headerStream, indexStream);
+      } catch (Exception e) {
+        try {
+          indexStream.close();
+        } catch (Exception onClose) {
+          e.addSuppressed(onClose);
+        }
+        throw e;
+      }
+    } catch (Exception e) {
+      try {
+        headerStream.close();
+      } catch (Exception onClose) {
+        e.addSuppressed(onClose);
+      }
+      throw e;
+    }
   }
 
 }
