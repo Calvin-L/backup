@@ -1,0 +1,10 @@
+package software.amazon.awssdk.utils;
+
+import software.amazon.awssdk.annotations.SdkPublicApi;
+import org.checkerframework.checker.mustcall.qual.InheritableMustCall;
+
+@SdkPublicApi
+@InheritableMustCall("close")
+public interface SdkAutoCloseable extends AutoCloseable {
+    @Override void close();
+}
