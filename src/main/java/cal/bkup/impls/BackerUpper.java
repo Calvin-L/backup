@@ -31,6 +31,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import org.checkerframework.checker.mustcall.qual.MustCall;
 import org.checkerframework.checker.nullness.qual.EnsuresNonNull;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.IOException;
@@ -72,7 +73,7 @@ import java.util.stream.Stream;
  *   <li>One master password encrypts an index containing the keys and other metadata</li>
  * </ul>
  */
-@SuppressWarnings({"contracts.postcondition", "argument", "assignment", "initialization.field.uninitialized", "dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return", "methodref.receiver.bound"}) // TODO
+@SuppressWarnings({"argument", "assignment", "initialization.field.uninitialized", "dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return", "methodref.receiver.bound"}) // TODO
 public class BackerUpper {
 
   // Configuration: how do things get stored
@@ -732,7 +733,7 @@ public class BackerUpper {
   // -------------------------------------------------------------------------
   // Helpers for managing the index
 
-  private Pair<Tag, BackupIndex> readLatestFromIndexStore(String password) throws IOException {
+  private Pair<@NonNull Tag, @NonNull BackupIndex> readLatestFromIndexStore(String password) throws IOException {
     for (;;) {
       var tag = indexStore.head();
       BackupIndex index;
@@ -755,7 +756,7 @@ public class BackerUpper {
 
   @EnsuresNonNull({"this.index", "this.tagForLastIndexLoad"})
   private void loadIndexIfMissing(String password) throws IOException {
-    if (index == null) {
+    if (index == null || tagForLastIndexLoad == null) {
       var tagAndIndex = readLatestFromIndexStore(password);
       tagForLastIndexLoad = tagAndIndex.fst();
       index = tagAndIndex.snd();
