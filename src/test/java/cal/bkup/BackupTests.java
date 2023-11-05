@@ -943,6 +943,15 @@ public class BackupTests {
     var fileB = new RegularFile(Paths.get("tmp", "b"), t1, 2, 102);
     var fileC = new RegularFile(Paths.get("tmp", "c"), t2, 2, 103);
 
+    StringBuilder longContentsBuilder = new StringBuilder();
+    int longContentsSize = 0;
+    while (longContentsSize < Util.SUGGESTED_BUFFER_SIZE * 10) {
+      String s = "Hello, world!\n";
+      longContentsBuilder.append(s);
+      longContentsSize += s.length();
+    }
+    String longContents = longContentsBuilder.toString();
+
     Filesystem fs = new FakeFilesystem() {
       @Override
       public InputStream openRegularFileForReading(Path path) throws NoSuchFileException {
@@ -969,7 +978,7 @@ public class BackupTests {
       @Override
       public InputStream openRegularFileForReading(Path path) throws NoSuchFileException {
         if (path.equals(fileA.path())) {
-          return new ByteArrayInputStream("contents3".getBytes(StandardCharsets.UTF_8));
+          return new ByteArrayInputStream(longContents.getBytes(StandardCharsets.UTF_8));
         } else if (path.equals(fileB.path())) {
           return new ByteArrayInputStream("contents1".getBytes(StandardCharsets.UTF_8));
         } else if (path.equals(fileC.path())) {
@@ -1016,7 +1025,7 @@ public class BackupTests {
       try {
         Assert.assertEquals(
                 stringify(backup2.restore(password, ((BackupIndex.RegularFileRev) index.getInfo(system, fileA.path()).get(1)).summary())),
-                "contents3");
+                longContents);
         break;
       } catch (NoSuchFileException ignored) {
         continue;

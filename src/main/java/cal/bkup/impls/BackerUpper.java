@@ -22,16 +22,13 @@ import cal.prim.time.MonotonicRealTimeClock;
 import cal.prim.time.UnreliableWallClock;
 import cal.prim.transforms.BlobTransformer;
 import cal.prim.transforms.Encryption;
-import cal.prim.transforms.StatisticsCollectingInputStream;
 import cal.prim.transforms.TrimmedInputStream;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import org.checkerframework.checker.calledmethods.qual.EnsuresCalledMethods;
-import org.checkerframework.checker.mustcall.qual.MustCall;
 import org.checkerframework.checker.mustcall.qual.Owning;
-import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,7 +54,6 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -72,7 +68,7 @@ import java.util.stream.Stream;
  *   <li>One master password encrypts an index containing the keys and other metadata</li>
  * </ul>
  */
-@SuppressWarnings({"dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return"}) // TODO
+@SuppressWarnings({"required.method.not.called", "methodref.return"}) // TODO
 public class BackerUpper {
 
   // Configuration: how do things get stored
@@ -188,15 +184,13 @@ public class BackerUpper {
       System.err.println("Shutting down...");
       keepRunning.set(false);
     })) {
-      BackupIndex.BackupMetadata backupId = null;
 
       try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2L + symlinks.size() + hardlinks.size() + toForget.size());
            var txn = indexStore.beginTransaction(currentPassword)) {
 
         var index = txn.getIndex();
-
         var lastIndexSave = durationClock.sample();
-        backupId = index.startBackup(whatSystemIsThis, wallClock.now());
+        BackupIndex.BackupMetadata backupId = index.startBackup(whatSystemIsThis, wallClock.now());
 
         var remainingFiles = new LinkedHashSet<>(files);
         while (!remainingFiles.isEmpty()) {
@@ -533,81 +527,12 @@ public class BackerUpper {
     String key = Util.randomPassword();
 
     EventuallyConsistentBlobStore.PutResult result;
-    try (InputStream is = new InputStream() {
-      long bytesSent = 0L;
-      final Iterator<Pair<RegularFile, Sha256AndSize>> remaining = files.iterator();
-      @Nullable RegularFile currentFile = null;
-      long startOffsetOfCurrentFile;
-      @Nullable StatisticsCollectingInputStream stats = null;
-      @Nullable InputStream current;
-      @Nullable Task task = null;
-
-      @SuppressWarnings("argument") // TODO
-      final Consumer<@MustCall({}) StatisticsCollectingInputStream> reportProgress = s ->
-              display.reportProgress(task, s.getBytesRead(), currentFile.sizeInBytes());
-
-      {
-        openNext();
-      }
-
-      private void closeCurrent() throws IOException {
-        if (current != null) {
-          try {
-            current.close();
-            assert stats.isClosed();
-            var path = currentFile.path();
-            offsetsAtTarget.put(path, startOffsetOfCurrentFile);
-            sizesAtTarget.put(path, bytesSent - startOffsetOfCurrentFile);
-            actualSummaries.put(path, new Sha256AndSize(
-                    stats.getSha256Digest(),
-                    stats.getBytesRead()));
-          } catch (Exception e) {
-            e.printStackTrace();
-            throw e;
-          }
-          if (task != null) {
-            display.finishTask(task);
-          }
-        }
-      }
-
-      private void openNext() throws IOException {
-        if (remaining.hasNext()) {
-          currentFile = remaining.next().fst();
-          task = display.startTask("Upload " + currentFile.path());
-          startOffsetOfCurrentFile = bytesSent;
-          var newStats = new StatisticsCollectingInputStream(Util.buffered(fs.openRegularFileForReading(currentFile.path())), reportProgress);
-          stats = newStats;
-          current = transformer.followedBy(new Encryption(key)).apply(newStats);
-        } else {
-          current = null;
-        }
-      }
-
-      @Override
-      public int read() throws IOException {
-        while (current != null) {
-          int nextByte = current.read();
-          if (nextByte < 0) {
-            closeCurrent();
-            openNext();
-          } else {
-            ++bytesSent;
-            return nextByte;
-          }
-        }
-        return -1;
-      }
-
-      @Override
-      public void close() {
-        if (current != null) {
-          throw new RuntimeException("not all of the stream was consumed");
-        }
-      }
-    }) {
+    Task batchTask = display.startTask("Upload batch of " + files.size() + " files");
+    try (InputStream is = new BatchFileInputStream(
+        files, display, offsetsAtTarget, sizesAtTarget, actualSummaries, batchTask, fs, key, transformer)) {
       result = blobStore.put(is);
     }
+    display.finishTask(batchTask);
 
     // Sanity check: sum of sizes should equal total upload size
     long expectedSize = sizesAtTarget.values().stream().mapToLong(l -> l).sum();
@@ -768,4 +693,5 @@ public class BackerUpper {
       txn.close();
     }
   }
+
 }
