@@ -72,7 +72,7 @@ import java.util.stream.Stream;
  *   <li>One master password encrypts an index containing the keys and other metadata</li>
  * </ul>
  */
-@SuppressWarnings({"unboxing.of.nullable", "contracts.postcondition", "argument", "assignment", "initialization.field.uninitialized", "dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return", "methodref.receiver.bound"}) // TODO
+@SuppressWarnings({"contracts.postcondition", "argument", "assignment", "initialization.field.uninitialized", "dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return", "methodref.receiver.bound"}) // TODO
 public class BackerUpper {
 
   // Configuration: how do things get stored
@@ -706,12 +706,23 @@ public class BackerUpper {
     for (var pair : files) {
       var f = pair.fst();
       var path = f.path();
+
+      Long offsetAtTarget = offsetsAtTarget.get(path);
+      if (offsetAtTarget == null) {
+        throw new IllegalStateException("No target offset for " + path);
+      }
+
+      Long sizeAtTarget = sizesAtTarget.get(path);
+      if (sizeAtTarget == null) {
+        throw new IllegalStateException("No target offset for " + path);
+      }
+
       finalReports.put(f, new Pair<>(
               actualSummaries.get(path),
               new BackupReport(
                       result.identifier(),
-                      offsetsAtTarget.get(path),
-                      sizesAtTarget.get(path),
+                      offsetAtTarget,
+                      sizeAtTarget,
                       key)));
     }
 
