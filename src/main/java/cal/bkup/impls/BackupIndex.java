@@ -27,6 +27,8 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -98,6 +100,31 @@ public class BackupIndex {
     this.files = data;
     this.blobs = blobs;
     this.cleanupGeneration = cleanupGeneration;
+  }
+
+  /**
+   * Copy constructor.
+   *
+   * @param index an index to copy
+   */
+  public BackupIndex(BackupIndex index) {
+    backupHistory = mutableCopyOf(index.backupHistory, l -> mutableCopyOf(l, UnaryOperator.identity()));
+    files = mutableCopyOf(index.files, paths -> mutableCopyOf(paths, revisions -> mutableCopyOf(revisions, UnaryOperator.identity())));
+    blobs = mutableCopyOf(index.blobs, UnaryOperator.identity());
+    cleanupGeneration = index.cleanupGeneration;
+  }
+
+  @SuppressWarnings("return") // some cryptic nonsense about @KeyFor... :/
+  private static <K, V> Map<K, V> mutableCopyOf(Map<K, V> m, UnaryOperator<V> copyValue) {
+    return m.entrySet().stream().collect(Collectors.toMap(
+        Map.Entry::getKey,
+        v -> copyValue.apply(v.getValue())));
+  }
+
+  private static <T> List<T> mutableCopyOf(List<T> l, UnaryOperator<T> copyValue) {
+    return l.stream()
+        .map(copyValue)
+        .collect(Collectors.toList());
   }
 
   @Override

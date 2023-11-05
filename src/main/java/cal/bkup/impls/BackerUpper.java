@@ -1,23 +1,22 @@
 package cal.bkup.impls;
 
 import cal.bkup.Util;
+import cal.bkup.impls.ProgressDisplay.Task;
 import cal.bkup.types.BackupReport;
 import cal.bkup.types.IndexFormat;
 import cal.bkup.types.Sha256AndSize;
 import cal.bkup.types.StorageCostModel;
 import cal.bkup.types.SystemId;
-import cal.prim.MalformedDataException;
 import cal.prim.NoValue;
 import cal.prim.Pair;
-import cal.prim.PreconditionFailed;
 import cal.prim.Price;
+import cal.prim.QuietAutoCloseable;
 import cal.prim.fs.Filesystem;
 import cal.prim.fs.HardLink;
 import cal.prim.fs.Link;
 import cal.prim.fs.RegularFile;
 import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
-import cal.prim.storage.ConsistentBlob.Tag;
 import cal.prim.storage.EventuallyConsistentBlobStore;
 import cal.prim.time.MonotonicRealTimeClock;
 import cal.prim.time.UnreliableWallClock;
@@ -29,9 +28,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import org.checkerframework.checker.calledmethods.qual.EnsuresCalledMethods;
 import org.checkerframework.checker.mustcall.qual.MustCall;
-import org.checkerframework.checker.nullness.qual.EnsuresNonNull;
-import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.mustcall.qual.Owning;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.IOException;
@@ -73,27 +72,21 @@ import java.util.stream.Stream;
  *   <li>One master password encrypts an index containing the keys and other metadata</li>
  * </ul>
  */
-@SuppressWarnings({"argument", "assignment", "initialization.field.uninitialized", "dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return", "methodref.receiver.bound"}) // TODO
+@SuppressWarnings({"dereference.of.nullable", "method.invocation", "required.method.not.called", "methodref.return"}) // TODO
 public class BackerUpper {
 
   // Configuration: how do things get stored
-  private final ConsistentBlob indexStore;
-  private final IndexFormat indexFormat;
-  private final EventuallyConsistentBlobStore blobStore;
+  private final CachedBackupIndex indexStore;
   private final BlobTransformer transformer;
+  private final EventuallyConsistentBlobStore blobStore;
   private final UnreliableWallClock wallClock;
   private final MonotonicRealTimeClock durationClock = MonotonicRealTimeClock.SYSTEM_CLOCK;
   private final Duration PERIODIC_INDEX_RATE = Duration.ofMinutes(15);
 
-  // Cached data
-  private @Nullable BackupIndex index = null;
-  private @Nullable Tag tagForLastIndexLoad = null;
-
   public BackerUpper(ConsistentBlob indexStore, IndexFormat indexFormat, EventuallyConsistentBlobStore blobStore, BlobTransformer transformer, UnreliableWallClock wallClock) {
-    this.indexStore = indexStore;
-    this.indexFormat = indexFormat;
-    this.blobStore = blobStore;
+    this.indexStore = new CachedBackupIndex(indexStore, indexFormat, transformer);
     this.transformer = transformer;
+    this.blobStore = blobStore;
     this.wallClock = wallClock;
   }
 
@@ -113,14 +106,14 @@ public class BackerUpper {
           Collection<SymLink> symlinks,
           Collection<HardLink> hardlinks) throws IOException {
 
-    loadIndexIfMissing(passwordForIndex);
-
     long bytesUploaded = 0;
     Price totalUploadCost = Price.ZERO;
     Price monthlyStorageCost = Price.ZERO;
     Collection<RegularFile> filteredFiles = new ArrayList<>();
     Collection<Path> toForget = new ArrayList<>();
     Set<Path> inThisBackup = new HashSet<>();
+
+    var index = indexStore.getIndex(passwordForIndex);
 
     for (RegularFile f : files) {
       inThisBackup.add(f.path());
@@ -197,8 +190,10 @@ public class BackerUpper {
     })) {
       BackupIndex.BackupMetadata backupId = null;
 
-      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2L + symlinks.size() + hardlinks.size() + toForget.size())) {
-        loadIndexIfMissing(currentPassword);
+      try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2L + symlinks.size() + hardlinks.size() + toForget.size());
+           var txn = indexStore.beginTransaction(currentPassword)) {
+
+        var index = txn.getIndex();
 
         var lastIndexSave = durationClock.sample();
         backupId = index.startBackup(whatSystemIsThis, wallClock.now());
@@ -224,14 +219,12 @@ public class BackerUpper {
 
           var now = durationClock.sample();
           if (Util.ge(durationClock.timeBetweenSamples(lastIndexSave, now), PERIODIC_INDEX_RATE)) {
-            saveIndex(currentPassword, newPasswordForIndex, ConflictBehavior.TRY_MERGE);
-            currentPassword = newPasswordForIndex;
-            lastIndexSave = now;
+            txn.commit(newPasswordForIndex, CachedBackupIndex.ConflictBehavior.TRY_MERGE);
           }
         }
 
         for (var link : symlinks) {
-          ProgressDisplay.Task task = progress.startTask("Adding soft link " + link.source() + " --> " + link.destination());
+          Task task = progress.startTask("Adding soft link " + link.source() + " --> " + link.destination());
           BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.source());
           if (latest instanceof BackupIndex.SoftLinkRev linkRev && Objects.equals(linkRev.target(), link.destination())) {
             progress.finishTask(task);
@@ -242,7 +235,7 @@ public class BackerUpper {
         }
 
         for (var link : hardlinks) {
-          ProgressDisplay.Task task = progress.startTask("Adding hard link " + link.source() + " --> " + link.destination());
+          Task task = progress.startTask("Adding hard link " + link.source() + " --> " + link.destination());
           BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.source());
           if (latest instanceof BackupIndex.HardLinkRev linkRev && Objects.equals(linkRev.target(), link.destination())) {
             progress.finishTask(task);
@@ -253,23 +246,19 @@ public class BackerUpper {
         }
 
         for (Path p : toForget) {
-          ProgressDisplay.Task task = progress.startTask("Removing from backup " + p);
+          Task task = progress.startTask("Removing from backup " + p);
           index.appendTombstone(whatSystemIsThis, backupId, p);
           progress.finishTask(task);
         }
+
+        index.finishBackup(whatSystemIsThis, backupId, wallClock.now());
+        txn.commit(newPasswordForIndex, CachedBackupIndex.ConflictBehavior.TRY_MERGE);
       } finally {
-        try {
-          if (backupId != null) {
-            index.finishBackup(whatSystemIsThis, backupId, wallClock.now());
-            saveIndex(currentPassword, newPasswordForIndex, ConflictBehavior.TRY_MERGE);
-          }
-        } finally {
-          if (warnings.size() > 0) {
-            System.out.println(warnings.size() + " warnings:");
-            for (String w : warnings) {
-              System.out.print(" - ");
-              System.out.println(w);
-            }
+        if (warnings.size() > 0) {
+          System.out.println(warnings.size() + " warnings:");
+          for (String w : warnings) {
+            System.out.print(" - ");
+            System.out.println(w);
           }
         }
       }
@@ -323,7 +312,7 @@ public class BackerUpper {
   }
 
   private Sha256AndSize summarize(Filesystem fs, RegularFile f, ProgressDisplay display) throws IOException {
-    ProgressDisplay.Task checksumTask = display.startTask("checksum " + f.path());
+    Task checksumTask = display.startTask("checksum " + f.path());
     try (InputStream in = Util.buffered(fs.openRegularFileForReading(f.path()))) {
       return Util.summarize(in, stream ->
               display.reportProgress(checksumTask, stream.getBytesRead(), f.sizeInBytes()));
@@ -357,15 +346,16 @@ public class BackerUpper {
   }
 
   public Stream<BackedUpThing> list(String indexPassword) throws IOException {
-    loadIndexIfMissing(indexPassword);
+    var index = indexStore.getIndex(indexPassword);
     return index.knownSystems().stream().flatMap(system -> index.knownPaths(system).stream().map(path -> {
       BackupIndex.Revision r = index.mostRecentRevision(system, path);
+      assert r != null : "@AssumeAssertion(nullness): known path must have at least 1 known revision";
       return new BackedUpThing(system, path, r);
     }));
   }
 
   public InputStream restore(String indexPassword, Sha256AndSize blob) throws IOException {
-    loadIndexIfMissing(indexPassword);
+    var index = indexStore.getIndex(indexPassword);
     BackupReport report = index.lookupBlob(blob);
     if (report == null) {
       throw new NoSuchElementException();
@@ -381,7 +371,7 @@ public class BackerUpper {
     }
   }
 
-  public interface CleanupPlan {
+  public interface CleanupPlan extends QuietAutoCloseable {
     long totalBlobsReclaimed();
     long untrackedBlobsReclaimed();
     long bytesReclaimed();
@@ -428,8 +418,8 @@ public class BackerUpper {
 
   public CleanupPlan planCleanup(String password, Duration retentionTime, StorageCostModel blobStorageCosts) throws IOException {
     var cutoff = wallClock.now().minus(retentionTime);
-
-    loadIndexIfMissing(password);
+    var txn = indexStore.beginTransaction(password);
+    var index = txn.getIndex();
 
     // NOTE: There are several kinds of blobs in `blobsExistingAtStart`:
     //  (1) "Orphaned" blobs that were created by failed backups.  These
@@ -525,88 +515,7 @@ public class BackerUpper {
             .map(Objects::requireNonNull)
             .collect(ArrayListMultimap::create, (m, i) -> m.put(i.idAtTarget(), i), Multimap::putAll);
 
-    return new CleanupPlan() {
-      @Override
-      public long totalBlobsReclaimed() {
-        return blobsToDelete.size();
-      }
-
-      @Override
-      public long untrackedBlobsReclaimed() {
-        Set<String> blobsKnownToIndex = index.listBlobs()
-            .map(index::lookupBlob)
-            .map(Objects::requireNonNull)
-            .map(BackupReport::idAtTarget)
-            .collect(Collectors.toSet());
-        return blobsToDelete.stream().filter(b -> !blobsKnownToIndex.contains(b)).count();
-      }
-
-      @Override
-      public long bytesReclaimed() {
-        return blobsToDelete.stream()
-                .map(backedUpBlobsByIDAtTarget::get)
-                .filter(Objects::nonNull)
-                .flatMap(Collection::stream)
-                .mapToLong(BackupReport::sizeAtTarget)
-                .sum();
-      }
-
-      @Override
-      public Price estimatedExecutionCost() {
-        return blobsToDelete.stream()
-                .map(backedUpBlobsByIDAtTarget::get)
-                .filter(Objects::nonNull)
-                .flatMap(Collection::stream)
-                .map(report -> blobStorageCosts.costToDeleteBlob(report.sizeAtTarget(), Duration.ZERO))
-                .reduce(Price.ZERO, Price::plus);
-      }
-
-      @Override
-      public Price estimatedMonthlyCost() {
-        return blobsToDelete.stream()
-                .map(backedUpBlobsByIDAtTarget::get)
-                .filter(Objects::nonNull)
-                .flatMap(Collection::stream)
-                .mapToLong(BackupReport::sizeAtTarget)
-                .mapToObj(blobStorageCosts::monthlyStorageCostForBlob)
-                .reduce(Price.ZERO, Price::plus)
-                .negate();
-      }
-
-      @Override
-      public void execute() throws IOException, BackupIndex.MergeConflict {
-        System.out.println("Cleaning up index");
-        index.checkIntegrity();
-
-        for (RevisionID rev : revisionsToForget) {
-          index.forgetRevision(rev.system, rev.path, rev.revision);
-        }
-        for (BackupID backup : backupsToForget) {
-          index.forgetBackup(backup.system, backup.info);
-        }
-        for (SystemId system : systemsToForget) {
-          index.forgetSystem(system);
-        }
-        for (Sha256AndSize blob : summariesToForget) {
-          index.forgetBlob(blob);
-        }
-
-        index.checkIntegrity();
-
-        System.out.println("Bumping cleanup generation and saving index");
-        index.bumpCleanupGeneration();
-        saveIndex(password, password, ConflictBehavior.ALWAYS_FAIL);
-
-        System.out.println("Cleaning up the index store");
-        indexStore.cleanup(true);
-
-        System.out.println("Deleting " + blobsToDelete.size() + " blobs");
-        for (String blobName : blobsToDelete) {
-          System.out.println(" --> " + blobName);
-          blobStore.delete(blobName);
-        }
-      }
-    };
+    return new CleanupPlanImpl(blobsToDelete, backedUpBlobsByIDAtTarget, blobStorageCosts, revisionsToForget, backupsToForget, systemsToForget, summariesToForget, txn, password);
   }
 
   // -------------------------------------------------------------------------
@@ -627,12 +536,13 @@ public class BackerUpper {
     try (InputStream is = new InputStream() {
       long bytesSent = 0L;
       final Iterator<Pair<RegularFile, Sha256AndSize>> remaining = files.iterator();
-      RegularFile currentFile;
+      @Nullable RegularFile currentFile = null;
       long startOffsetOfCurrentFile;
-      StatisticsCollectingInputStream stats;
-      InputStream current;
-      ProgressDisplay.Task task;
+      @Nullable StatisticsCollectingInputStream stats = null;
+      @Nullable InputStream current;
+      @Nullable Task task = null;
 
+      @SuppressWarnings("argument") // TODO
       final Consumer<@MustCall({}) StatisticsCollectingInputStream> reportProgress = s ->
               display.reportProgress(task, s.getBytesRead(), currentFile.sizeInBytes());
 
@@ -655,7 +565,9 @@ public class BackerUpper {
             e.printStackTrace();
             throw e;
           }
-          display.finishTask(task);
+          if (task != null) {
+            display.finishTask(task);
+          }
         }
       }
 
@@ -664,8 +576,9 @@ public class BackerUpper {
           currentFile = remaining.next().fst();
           task = display.startTask("Upload " + currentFile.path());
           startOffsetOfCurrentFile = bytesSent;
-          stats = new StatisticsCollectingInputStream(Util.buffered(fs.openRegularFileForReading(currentFile.path())), reportProgress);
-          current = transformer.followedBy(new Encryption(key)).apply(stats);
+          var newStats = new StatisticsCollectingInputStream(Util.buffered(fs.openRegularFileForReading(currentFile.path())), reportProgress);
+          stats = newStats;
+          current = transformer.followedBy(new Encryption(key)).apply(newStats);
         } else {
           current = null;
         }
@@ -715,11 +628,16 @@ public class BackerUpper {
 
       Long sizeAtTarget = sizesAtTarget.get(path);
       if (sizeAtTarget == null) {
-        throw new IllegalStateException("No target offset for " + path);
+        throw new IllegalStateException("No target size for " + path);
+      }
+
+      Sha256AndSize summary = actualSummaries.get(path);
+      if (summary == null) {
+        throw new IllegalStateException("No summary for " + path);
       }
 
       finalReports.put(f, new Pair<>(
-              actualSummaries.get(path),
+              summary,
               new BackupReport(
                       result.identifier(),
                       offsetAtTarget,
@@ -730,100 +648,124 @@ public class BackerUpper {
     return finalReports;
   }
 
-  // -------------------------------------------------------------------------
-  // Helpers for managing the index
-
-  private Pair<@NonNull Tag, @NonNull BackupIndex> readLatestFromIndexStore(String password) throws IOException {
-    for (;;) {
-      var tag = indexStore.head();
-      BackupIndex index;
-      System.out.println("Reading index " + tag + "...");
-      try (InputStream in = transformer.followedBy(new Encryption(password)).unApply(indexStore.read(tag))) {
-        index = indexFormat.load(in);
-        System.out.println(" *** read index");
-      } catch (NoValue noValue) {
-        System.out.println("No index was found; creating a new one");
-        index = new BackupIndex();
-      } catch (ConsistentBlob.TagExpired ignored) {
-        System.out.println("The tag expired; retrying...");
-        continue;
-      } catch (MalformedDataException e) {
-        throw new IllegalStateException("The index appears to have become corrupt!", e);
-      }
-      return new Pair<>(tag, index);
-    }
-  }
-
-  @EnsuresNonNull({"this.index", "this.tagForLastIndexLoad"})
-  private void loadIndexIfMissing(String password) throws IOException {
-    if (index == null || tagForLastIndexLoad == null) {
-      var tagAndIndex = readLatestFromIndexStore(password);
-      tagForLastIndexLoad = tagAndIndex.fst();
-      index = tagAndIndex.snd();
-    }
+  public BackupIndex getIndex(String password) throws IOException {
+    return indexStore.getIndex(password);
   }
 
   public InputStream readRawIndex(String password) throws IOException, NoValue, ConsistentBlob.TagExpired {
-    return transformer.followedBy(new Encryption(password)).unApply(indexStore.read(indexStore.head()));
+    return indexStore.readRawIndex(password);
   }
 
-  @VisibleForTesting
-  public BackupIndex getIndex(String password) throws IOException {
-    loadIndexIfMissing(password);
-    return index;
-  }
+  private class CleanupPlanImpl implements CleanupPlan {
+    private final Set<String> blobsToDelete;
+    private final Multimap<String, BackupReport> backedUpBlobsByIDAtTarget;
+    private final StorageCostModel blobStorageCosts;
+    private final Set<RevisionID> revisionsToForget;
+    private final Set<BackupID> backupsToForget;
+    private final Set<SystemId> systemsToForget;
+    private final Set<Sha256AndSize> summariesToForget;
+    private final @Owning CachedBackupIndex.Transaction txn;
+    private final String password;
 
-  private enum ConflictBehavior {
-    TRY_MERGE,
-    ALWAYS_FAIL,
-  }
+    public CleanupPlanImpl(Set<String> blobsToDelete, Multimap<String, BackupReport> backedUpBlobsByIDAtTarget, StorageCostModel blobStorageCosts, Set<RevisionID> revisionsToForget, Set<BackupID> backupsToForget, Set<SystemId> systemsToForget, Set<Sha256AndSize> summariesToForget, CachedBackupIndex.Transaction txn, String password) {
+      this.blobsToDelete = blobsToDelete;
+      this.backedUpBlobsByIDAtTarget = backedUpBlobsByIDAtTarget;
+      this.blobStorageCosts = blobStorageCosts;
+      this.revisionsToForget = revisionsToForget;
+      this.backupsToForget = backupsToForget;
+      this.systemsToForget = systemsToForget;
+      this.summariesToForget = summariesToForget;
+      this.txn = txn;
+      this.password = password;
+    }
 
-  /**
-   * Commit the contents of {@link #index} to {@link #indexStore}.
-   * If another process has modified the index stored in {@link #indexStore},
-   * this method will download it, merge the other process's
-   * modifications with this one, and try again.
-   *
-   * @param currentPassword the old password, used if the index needs to be downloaded
-   * @param newPassword the password to encrypt the index
-   * @param onConflict what to do if another process has modified the index since it was last read
-   * @throws IOException
-   * @throws cal.bkup.impls.BackupIndex.MergeConflict if another process modified the index, but the changes
-   *         cannot be merged with the changes made by this process.  If this happens, the current {@link #index}
-   *         and {@link #tagForLastIndexLoad} are replaced by the current values.
-   */
-  private void saveIndex(String currentPassword, String newPassword, ConflictBehavior onConflict) throws IOException, BackupIndex.MergeConflict {
-    System.out.println("Saving index...");
-    for (;;) {
-      PreconditionFailed failure;
-      try (InputStream bytes = transformer.followedBy(new Encryption(newPassword)).apply(indexFormat.serialize(index))) {
-        tagForLastIndexLoad = indexStore.write(tagForLastIndexLoad, bytes);
-        return;
-      } catch (PreconditionFailed exn) {
-        failure = exn;
+    @Override
+    public long totalBlobsReclaimed() {
+      return blobsToDelete.size();
+    }
+
+    @Override
+    public long untrackedBlobsReclaimed() {
+      var index = txn.getIndex();
+      Set<String> blobsKnownToIndex = index.listBlobs()
+          .map(index::lookupBlob)
+          .map(Objects::requireNonNull)
+          .map(BackupReport::idAtTarget)
+          .collect(Collectors.toSet());
+      return blobsToDelete.stream().filter(b -> !blobsKnownToIndex.contains(b)).count();
+    }
+
+    @Override
+    public long bytesReclaimed() {
+      return blobsToDelete.stream()
+              .map(backedUpBlobsByIDAtTarget::get)
+              .filter(Objects::nonNull)
+              .flatMap(Collection::stream)
+              .mapToLong(BackupReport::sizeAtTarget)
+              .sum();
+    }
+
+    @Override
+    public Price estimatedExecutionCost() {
+      return blobsToDelete.stream()
+              .map(backedUpBlobsByIDAtTarget::get)
+              .filter(Objects::nonNull)
+              .flatMap(Collection::stream)
+              .map(report -> blobStorageCosts.costToDeleteBlob(report.sizeAtTarget(), Duration.ZERO))
+              .reduce(Price.ZERO, Price::plus);
+    }
+
+    @Override
+    public Price estimatedMonthlyCost() {
+      return blobsToDelete.stream()
+              .map(backedUpBlobsByIDAtTarget::get)
+              .filter(Objects::nonNull)
+              .flatMap(Collection::stream)
+              .mapToLong(BackupReport::sizeAtTarget)
+              .mapToObj(blobStorageCosts::monthlyStorageCostForBlob)
+              .reduce(Price.ZERO, Price::plus)
+              .negate();
+    }
+
+    @Override
+    public void execute() throws IOException, BackupIndex.MergeConflict {
+      System.out.println("Cleaning up index");
+      var index = txn.getIndex();
+      index.checkIntegrity();
+
+      for (RevisionID rev : revisionsToForget) {
+        index.forgetRevision(rev.system, rev.path, rev.revision);
+      }
+      for (BackupID backup : backupsToForget) {
+        index.forgetBackup(backup.system, backup.info);
+      }
+      for (SystemId system : systemsToForget) {
+        index.forgetSystem(system);
+      }
+      for (Sha256AndSize blob : summariesToForget) {
+        index.forgetBlob(blob);
       }
 
-      if (onConflict == ConflictBehavior.TRY_MERGE) {
-        System.out.println("Checkpoint failed due to " + failure);
-        System.out.println("This probably happened because another process modified the");
-        System.out.println("checkpoint while this process was running.  This process will");
-        System.out.println("reload the checkpoint, merge its progress, and try again...");
-        var latest = readLatestFromIndexStore(currentPassword);
-        tagForLastIndexLoad = latest.fst();
-        try {
-          index = index.merge(latest.snd());
-        } catch (BackupIndex.MergeConflict exn) {
-          // merge failed; invalidate cached data
-          index = latest.snd();
-          throw exn;
-        }
-      } else {
-        // invalidate cached data
-        tagForLastIndexLoad = null;
-        index = null;
-        throw new BackupIndex.MergeConflict("The index could not be saved due to concurrent modification");
+      index.checkIntegrity();
+
+      System.out.println("Bumping cleanup generation and saving index");
+      index.bumpCleanupGeneration();
+      txn.commit(password, CachedBackupIndex.ConflictBehavior.ALWAYS_FAIL);
+
+      System.out.println("Cleaning up the index store");
+      indexStore.cleanup(true);
+
+      System.out.println("Deleting " + blobsToDelete.size() + " blobs");
+      for (String blobName : blobsToDelete) {
+        System.out.println(" --> " + blobName);
+        blobStore.delete(blobName);
       }
     }
-  }
 
+    @Override
+    @EnsuresCalledMethods(value = "txn", methods = {"close"})
+    public void close() {
+      txn.close();
+    }
+  }
 }

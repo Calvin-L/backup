@@ -366,18 +366,19 @@ public class Main {
 
     if (flags.gc) {
       System.out.println("Planning cleanup...");
-      BackerUpper.CleanupPlan plan = backupper.planCleanup(password, Duration.ofDays(60), COST_MODEL);
-      System.out.println("Estimated costs:");
-      System.out.println("  deleted blobs:       " + plan.totalBlobsReclaimed() + " (" + plan.untrackedBlobsReclaimed() + " of which are not known to the index)");
-      System.out.println("  reclaimed bytes:     " + Util.formatSize(plan.bytesReclaimed()));
-      System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
-      System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
-      if (!flags.dryRun && confirm("Proceed?")) {
-        try {
-          plan.execute();
-        } catch (BackupIndex.MergeConflict mergeConflict) {
-          System.err.println("Cleanup was skipped due to a concurrent backup.");
-          System.err.println("Wait for the other backup to finish, and run the cleanup again.");
+      try (BackerUpper.CleanupPlan plan = backupper.planCleanup(password, Duration.ofDays(60), COST_MODEL)) {
+        System.out.println("Estimated costs:");
+        System.out.println("  deleted blobs:       " + plan.totalBlobsReclaimed() + " (" + plan.untrackedBlobsReclaimed() + " of which are not known to the index)");
+        System.out.println("  reclaimed bytes:     " + Util.formatSize(plan.bytesReclaimed()));
+        System.out.println("  backup cost now:     " + plan.estimatedExecutionCost());
+        System.out.println("  monthly maintenance: " + plan.estimatedMonthlyCost());
+        if (!flags.dryRun && confirm("Proceed?")) {
+          try {
+            plan.execute();
+          } catch (BackupIndex.MergeConflict mergeConflict) {
+            System.err.println("Cleanup was skipped due to a concurrent backup.");
+            System.err.println("Wait for the other backup to finish, and run the cleanup again.");
+          }
         }
       }
     }
