@@ -188,9 +188,8 @@ public class BackerUpper {
       try (ProgressDisplay progress = new ProgressDisplay(files.size() * 2L + symlinks.size() + hardlinks.size() + toForget.size());
            var txn = indexStore.beginTransaction(currentPassword)) {
 
-        var index = txn.getIndex();
         var lastIndexSave = durationClock.sample();
-        BackupIndex.BackupMetadata backupId = index.startBackup(whatSystemIsThis, wallClock.now());
+        BackupIndex.BackupMetadata backupId = txn.startBackup(whatSystemIsThis, wallClock.now());
 
         var remainingFiles = new LinkedHashSet<>(files);
         while (!remainingFiles.isEmpty()) {
@@ -198,55 +197,56 @@ public class BackerUpper {
             return;
           }
 
-          var batch = nextBatch(fs, remainingFiles, whatSystemIsThis, backupId, index, progress, warnings);
+          var batch = nextBatch(fs, remainingFiles, whatSystemIsThis, backupId, txn, progress, warnings);
           var uploadResult = uploadBatch(fs, batch, progress);
           for (var entry : uploadResult.entrySet()) {
             var f = entry.getKey();
             var summary = entry.getValue().fst();
             var report = entry.getValue().snd();
-            var actualReport = index.addOrCanonicalizeBackedUpBlob(summary, report);
+            var actualReport = txn.addOrCanonicalizeBackedUpBlob(summary, report);
             if (!actualReport.equals(report)) {
               warnings.add("Duplicate file detected in batch " + report.idAtTarget() + " (" + report.sizeAtTarget() + " junk bytes were uploaded)");
             }
-            index.appendRevision(whatSystemIsThis, backupId, f.path(), f.modTime(), summary);
+            txn.appendRevision(whatSystemIsThis, backupId, f.path(), f.modTime(), summary);
           }
 
           var now = durationClock.sample();
           if (Util.ge(durationClock.timeBetweenSamples(lastIndexSave, now), PERIODIC_INDEX_RATE)) {
-            txn.commit(newPasswordForIndex, CachedBackupIndex.ConflictBehavior.TRY_MERGE);
+            txn.commit(newPasswordForIndex);
+            lastIndexSave = now;
           }
         }
 
         for (var link : symlinks) {
           Task task = progress.startTask("Adding soft link " + link.source() + " --> " + link.destination());
-          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.source());
+          BackupIndex.Revision latest = txn.mostRecentRevision(whatSystemIsThis, link.source());
           if (latest instanceof BackupIndex.SoftLinkRev linkRev && Objects.equals(linkRev.target(), link.destination())) {
             progress.finishTask(task);
             continue;
           }
-          index.appendRevision(whatSystemIsThis, backupId, link.source(), link);
+          txn.appendRevision(whatSystemIsThis, backupId, link.source(), link);
           progress.finishTask(task);
         }
 
         for (var link : hardlinks) {
           Task task = progress.startTask("Adding hard link " + link.source() + " --> " + link.destination());
-          BackupIndex.Revision latest = index.mostRecentRevision(whatSystemIsThis, link.source());
+          BackupIndex.Revision latest = txn.mostRecentRevision(whatSystemIsThis, link.source());
           if (latest instanceof BackupIndex.HardLinkRev linkRev && Objects.equals(linkRev.target(), link.destination())) {
             progress.finishTask(task);
             continue;
           }
-          index.appendRevision(whatSystemIsThis, backupId, link.source(), link);
+          txn.appendRevision(whatSystemIsThis, backupId, link.source(), link);
           progress.finishTask(task);
         }
 
         for (Path p : toForget) {
           Task task = progress.startTask("Removing from backup " + p);
-          index.appendTombstone(whatSystemIsThis, backupId, p);
+          txn.appendTombstone(whatSystemIsThis, backupId, p);
           progress.finishTask(task);
         }
 
-        index.finishBackup(whatSystemIsThis, backupId, wallClock.now());
-        txn.commit(newPasswordForIndex, CachedBackupIndex.ConflictBehavior.TRY_MERGE);
+        txn.finishBackup(whatSystemIsThis, backupId, wallClock.now());
+        txn.commit(newPasswordForIndex);
       } finally {
         if (warnings.size() > 0) {
           System.out.println(warnings.size() + " warnings:");
@@ -265,7 +265,7 @@ public class BackerUpper {
    * Files may be skipped if they have disappeared or if they are already present
    * in the <code>index</code>.
    */
-  private Collection<Pair<RegularFile, Sha256AndSize>> nextBatch(Filesystem fs, Collection<RegularFile> files, SystemId systemId, BackupIndex.BackupMetadata backupId, BackupIndex index, ProgressDisplay display, List<String> warnings) throws IOException {
+  private Collection<Pair<RegularFile, Sha256AndSize>> nextBatch(Filesystem fs, Collection<RegularFile> files, SystemId systemId, BackupIndex.BackupMetadata backupId, CachedBackupIndex.Transaction txn, ProgressDisplay display, List<String> warnings) throws IOException {
     final long PREFERRED_BATCH_SIZE_IN_BYTES = 10_000_000_000L; // 10 GB
 
     long total = 0;
@@ -287,14 +287,14 @@ public class BackerUpper {
             // defer to next batch
             continue;
           }
-          if (index.lookupBlob(summary) == null) {
+          if (txn.lookupBlob(summary) == null) {
             if (f.sizeInBytes() != summary.size()) {
               warnings.add("File " + f.path() + " changed size between planning and checksum");
             }
             result.add(new Pair<>(f, summary));
             total += summary.size();
           } else {
-            index.appendRevision(systemId, backupId, f.path(), f.modTime(), summary);
+            txn.appendRevision(systemId, backupId, f.path(), f.modTime(), summary);
             display.skipTask("Upload " + f.path(), "data is already present");
           }
         }
@@ -374,7 +374,7 @@ public class BackerUpper {
     void execute() throws IOException, BackupIndex.MergeConflict;
   }
 
-  private static boolean isSafeToForget(BackupIndex index, SystemId system, Path path, BackupIndex.Revision revision, long earliestBackupToKeep) {
+  private static boolean isSafeToForget(CachedBackupIndex.Transaction txn, SystemId system, Path path, BackupIndex.Revision revision, long earliestBackupToKeep) {
 
     // Diagram explaining hardlinks.
     //
@@ -394,7 +394,7 @@ public class BackerUpper {
     // to /a@R3, which will not be forgotten.
 
     return revision.backupNumber() < earliestBackupToKeep
-            && index.getInfo(system, path).stream().anyMatch(r -> revision.backupNumber() < r.backupNumber() && r.backupNumber() <= earliestBackupToKeep)
+            && txn.getInfo(system, path).stream().anyMatch(r -> revision.backupNumber() < r.backupNumber() && r.backupNumber() <= earliestBackupToKeep)
 //            && index.findHardLinksPointingTo(system, path, revision.backupNumber).stream().allMatch(hardlink -> isSafeToForget(index, system, path, hardlink, earliestBackupToKeep))
             ;
   }
@@ -413,7 +413,6 @@ public class BackerUpper {
   public CleanupPlan planCleanup(String password, Duration retentionTime, StorageCostModel blobStorageCosts) throws IOException {
     var cutoff = wallClock.now().minus(retentionTime);
     var txn = indexStore.beginTransaction(password);
-    var index = txn.getIndex();
 
     // NOTE: There are several kinds of blobs in `blobsExistingAtStart`:
     //  (1) "Orphaned" blobs that were created by failed backups.  These
@@ -427,8 +426,8 @@ public class BackerUpper {
     //      pending backups cannot complete successfully.
     Set<String> blobsExistingAtStart = blobStore.list().collect(Collectors.toSet());
     Set<RevisionID> revisionsAtStart = new LinkedHashSet<>(); // collected below
-    Set<BackupID> backupsAtStart = index.knownSystems().stream()
-        .flatMap(sys -> index.knownBackups(sys).stream().map(b -> new BackupID(sys, b)))
+    Set<BackupID> backupsAtStart = txn.knownSystems().stream()
+        .flatMap(sys -> txn.knownBackups(sys).stream().map(b -> new BackupID(sys, b)))
         .collect(Collectors.toSet());
 
     // "Mark" -- find everything reachable
@@ -439,8 +438,8 @@ public class BackerUpper {
     Set<Sha256AndSize> reachableSummaries = new LinkedHashSet<>();
 
     Queue<RevisionID> revisionsToVisit = new ArrayDeque<>();
-    for (SystemId system : index.knownSystems()) {
-      var backups = index.knownBackups(system);
+    for (SystemId system : txn.knownSystems()) {
+      var backups = txn.knownBackups(system);
       if (backups.size() > 0) {
         long earliestBackupToKeep = backups.stream().max(Comparator.comparingLong(BackupIndex.BackupMetadata::backupNumber)).get().backupNumber();
         for (BackupIndex.BackupMetadata backupInfo : backups) {
@@ -449,11 +448,11 @@ public class BackerUpper {
           }
         }
 
-        for (Path path : Util.sorted(index.knownPaths(system))) {
-          for (BackupIndex.Revision revision : index.getInfo(system, path)) {
+        for (Path path : Util.sorted(txn.knownPaths(system))) {
+          for (BackupIndex.Revision revision : txn.getInfo(system, path)) {
             var revID = new RevisionID(system, path, revision);
             revisionsAtStart.add(revID);
-            if (!(revision instanceof BackupIndex.TombstoneRev) && !isSafeToForget(index, system, path, revision, earliestBackupToKeep)) {
+            if (!(revision instanceof BackupIndex.TombstoneRev) && !isSafeToForget(txn, system, path, revision, earliestBackupToKeep)) {
               revisionsToVisit.add(revID);
             }
           }
@@ -465,26 +464,26 @@ public class BackerUpper {
       var revID = revisionsToVisit.remove();
       var system = revID.system();
       if (reachableRevisions.add(revID)) {
-        index.knownBackups(system).stream()
+        txn.knownBackups(system).stream()
             .filter(backup -> backup.backupNumber() == revID.revision().backupNumber())
             .map(info -> new BackupID(system, info))
             .forEach(reachableBackups::add);
         reachableSystems.add(system);
         if (revID.revision() instanceof BackupIndex.RegularFileRev f) {
-          var info = index.lookupBlob(f.summary());
+          var info = txn.lookupBlob(f.summary());
           if (info == null) {
             throw new IllegalStateException("No blob available for file revision " + f);
           }
           reachableBlobs.add(info.idAtTarget());
           reachableSummaries.add(f.summary());
         } else if (revID.revision() instanceof BackupIndex.HardLinkRev l) {
-          var target = index.resolveHardLinkTarget(system, l);
+          var target = txn.resolveHardLinkTarget(system, l);
           revisionsToVisit.add(new RevisionID(system, l.target(), target));
         }
 
         // If this is a non-tombstone, then the next tombstone after it is also reachable.
         if (!(revID.revision() instanceof BackupIndex.TombstoneRev)) {
-          Optional<BackupIndex.Revision> maybeNextRevision = index.getInfo(system, revID.path()).stream()
+          Optional<BackupIndex.Revision> maybeNextRevision = txn.getInfo(system, revID.path()).stream()
               .filter(rev -> rev.backupNumber() > revID.revision().backupNumber())
               .min(Comparator.comparingLong(BackupIndex.Revision::backupNumber));
           if (maybeNextRevision.isPresent()) {
@@ -498,14 +497,14 @@ public class BackerUpper {
     }
 
     // "Sweep" -- anything that isn't referenced can be deleted
-    Set<SystemId> systemsToForget = Sets.difference(index.knownSystems(), reachableSystems);
+    Set<SystemId> systemsToForget = Sets.difference(txn.knownSystems(), reachableSystems);
     Set<BackupID> backupsToForget = Sets.difference(backupsAtStart, reachableBackups);
     Set<RevisionID> revisionsToForget = Sets.difference(revisionsAtStart, reachableRevisions);
     Set<String> blobsToDelete = Sets.difference(blobsExistingAtStart, reachableBlobs);
-    Set<Sha256AndSize> summariesToForget = Sets.difference(index.listBlobs().collect(Collectors.toSet()), reachableSummaries);
+    Set<Sha256AndSize> summariesToForget = Sets.difference(txn.listBlobs().collect(Collectors.toSet()), reachableSummaries);
 
-    Multimap<String, BackupReport> backedUpBlobsByIDAtTarget = index.listBlobs()
-            .map(index::lookupBlob)
+    Multimap<String, BackupReport> backedUpBlobsByIDAtTarget = txn.listBlobs()
+            .map(txn::lookupBlob)
             .map(Objects::requireNonNull)
             .collect(ArrayListMultimap::create, (m, i) -> m.put(i.idAtTarget(), i), Multimap::putAll);
 
@@ -527,12 +526,12 @@ public class BackerUpper {
     String key = Util.randomPassword();
 
     EventuallyConsistentBlobStore.PutResult result;
-    Task batchTask = display.startTask("Upload batch of " + files.size() + " files");
+//    Task batchTask = display.startTask("Upload batch of " + files.size() + " files");
     try (InputStream is = new BatchFileInputStream(
-        files, display, offsetsAtTarget, sizesAtTarget, actualSummaries, batchTask, fs, key, transformer)) {
+        files, display, offsetsAtTarget, sizesAtTarget, actualSummaries, fs, key, transformer)) {
       result = blobStore.put(is);
     }
-    display.finishTask(batchTask);
+//    display.finishTask(batchTask);
 
     // Sanity check: sum of sizes should equal total upload size
     long expectedSize = sizesAtTarget.values().stream().mapToLong(l -> l).sum();
@@ -611,9 +610,8 @@ public class BackerUpper {
 
     @Override
     public long untrackedBlobsReclaimed() {
-      var index = txn.getIndex();
-      Set<String> blobsKnownToIndex = index.listBlobs()
-          .map(index::lookupBlob)
+      Set<String> blobsKnownToIndex = txn.listBlobs()
+          .map(txn::lookupBlob)
           .map(Objects::requireNonNull)
           .map(BackupReport::idAtTarget)
           .collect(Collectors.toSet());
@@ -655,27 +653,23 @@ public class BackerUpper {
     @Override
     public void execute() throws IOException, BackupIndex.MergeConflict {
       System.out.println("Cleaning up index");
-      var index = txn.getIndex();
-      index.checkIntegrity();
 
       for (RevisionID rev : revisionsToForget) {
-        index.forgetRevision(rev.system, rev.path, rev.revision);
+        txn.forgetRevision(rev.system, rev.path, rev.revision);
       }
       for (BackupID backup : backupsToForget) {
-        index.forgetBackup(backup.system, backup.info);
+        txn.forgetBackup(backup.system, backup.info);
       }
       for (SystemId system : systemsToForget) {
-        index.forgetSystem(system);
+        txn.forgetSystem(system);
       }
       for (Sha256AndSize blob : summariesToForget) {
-        index.forgetBlob(blob);
+        txn.forgetBlob(blob);
       }
 
-      index.checkIntegrity();
-
       System.out.println("Bumping cleanup generation and saving index");
-      index.bumpCleanupGeneration();
-      txn.commit(password, CachedBackupIndex.ConflictBehavior.ALWAYS_FAIL);
+      txn.bumpCleanupGeneration();
+      txn.commit(password);
 
       System.out.println("Cleaning up the index store");
       indexStore.cleanup(true);

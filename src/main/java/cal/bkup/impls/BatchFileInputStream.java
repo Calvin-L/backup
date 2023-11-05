@@ -28,7 +28,6 @@ class BatchFileInputStream extends InputStream {
   private final Map<Path, Long> offsetsAtTarget;
   private final Map<Path, Long> sizesAtTarget;
   private final Map<Path, Sha256AndSize> actualSummaries;
-  private final Task batchTask;
   private final Filesystem fs;
   private final String key;
   private final BlobTransformer transformer;
@@ -58,13 +57,12 @@ class BatchFileInputStream extends InputStream {
     }
   }
 
-  public BatchFileInputStream(Collection<Pair<RegularFile, Sha256AndSize>> files, ProgressDisplay display, Map<Path, Long> offsetsAtTarget, Map<Path, Long> sizesAtTarget, Map<Path, Sha256AndSize> actualSummaries, Task batchTask, Filesystem fs, String key, BlobTransformer transformer) throws IOException {
+  public BatchFileInputStream(Collection<Pair<RegularFile, Sha256AndSize>> files, ProgressDisplay display, Map<Path, Long> offsetsAtTarget, Map<Path, Long> sizesAtTarget, Map<Path, Sha256AndSize> actualSummaries, Filesystem fs, String key, BlobTransformer transformer) throws IOException {
     this.files = files;
     this.display = display;
     this.offsetsAtTarget = offsetsAtTarget;
     this.sizesAtTarget = sizesAtTarget;
     this.actualSummaries = actualSummaries;
-    this.batchTask = batchTask;
     this.fs = fs;
     this.key = key;
     this.transformer = transformer;
@@ -99,7 +97,6 @@ class BatchFileInputStream extends InputStream {
 
   @SuppressWarnings("missing.creates.mustcall.for")
   private void openNext() throws IOException {
-    display.reportProgress(batchTask, finishedFiles, files.size());
     var currentFile = remaining.next().fst();
     var task = display.startTask("Upload " + currentFile.path());
     var startOffsetOfCurrentFile = bytesSent;

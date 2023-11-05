@@ -1,10 +1,15 @@
 package cal.bkup.impls;
 
+import cal.bkup.types.BackupReport;
 import cal.bkup.types.IndexFormat;
+import cal.bkup.types.Sha256AndSize;
+import cal.bkup.types.SystemId;
 import cal.prim.MalformedDataException;
 import cal.prim.NoValue;
 import cal.prim.PreconditionFailed;
 import cal.prim.QuietAutoCloseable;
+import cal.prim.fs.HardLink;
+import cal.prim.fs.SymLink;
 import cal.prim.storage.ConsistentBlob;
 import cal.prim.storage.ConsistentBlob.Tag;
 import cal.prim.transforms.BlobTransformer;
@@ -13,6 +18,11 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * Provides efficient read/write access to a shared {@link BackupIndex} stored in a {@link ConsistentBlob}.
@@ -116,7 +126,7 @@ class CachedBackupIndex {
    *         cannot be merged with the changes made by this process.  If this happens, the current {@link #indexAndTag}
    *         is replaced by the current values.
    */
-  private void saveIndex(
+  private LoadedIndex saveIndex(
       BackupIndex index,
       Tag tag,
       String currentPassword,
@@ -124,13 +134,14 @@ class CachedBackupIndex {
       ConflictBehavior onConflict)
       throws IOException, BackupIndex.MergeConflict {
     System.out.println("Saving index...");
+    index.checkIntegrity();
     for (;;) {
       PreconditionFailed failure;
       try (InputStream raw = indexFormat.serialize(index);
            InputStream bytes = transformer.followedBy(new Encryption(newPassword)).apply(raw)) {
         var newTag = indexStore.write(tag, bytes);
         indexAndTag = new LoadedIndex(index, newTag, newPassword);
-        return;
+        return indexAndTag;
       } catch (PreconditionFailed exn) {
         failure = exn;
       }
@@ -152,7 +163,7 @@ class CachedBackupIndex {
     }
   }
 
-  public enum ConflictBehavior {
+  private enum ConflictBehavior {
     TRY_MERGE,
     ALWAYS_FAIL,
   }
@@ -161,11 +172,13 @@ class CachedBackupIndex {
 
     private final CachedBackupIndex parent;
 
-    private final BackupIndex index;
+    private BackupIndex index;
 
-    private final Tag expectedTag;
+    private Tag expectedTag;
 
     private String password;
+
+    private ConflictBehavior conflictBehavior;
 
     private boolean open;
 
@@ -174,19 +187,100 @@ class CachedBackupIndex {
       this.index = new BackupIndex(index);
       this.expectedTag = expectedTag;
       this.password = password;
+      this.conflictBehavior = ConflictBehavior.TRY_MERGE;
       this.open = true;
+      this.index.checkIntegrity();
     }
 
-    public BackupIndex getIndex() {
-      return index;
+    public Set<SystemId> knownSystems() {
+      return index.knownSystems();
     }
 
-    public void commit(String newPassword, ConflictBehavior onConflict) throws BackupIndex.MergeConflict, IOException {
+    public List<BackupIndex.BackupMetadata> knownBackups(SystemId system) {
+      return index.knownBackups(system);
+    }
+
+    public Set<Path> knownPaths(SystemId system) {
+      return index.knownPaths(system);
+    }
+
+    public Stream<Sha256AndSize> listBlobs() {
+      return index.listBlobs();
+    }
+
+    public @Nullable BackupReport lookupBlob(Sha256AndSize content) {
+      return index.lookupBlob(content);
+    }
+
+    public BackupIndex.@Nullable Revision mostRecentRevision(SystemId system, Path path) {
+      return index.mostRecentRevision(system, path);
+    }
+
+    public List<BackupIndex.Revision> getInfo(SystemId system, Path path) {
+      return index.getInfo(system, path);
+    }
+
+    public BackupIndex.Revision resolveHardLinkTarget(SystemId system, BackupIndex.HardLinkRev hardLink) {
+      return index.resolveHardLinkTarget(system, hardLink);
+    }
+
+    public BackupIndex.BackupMetadata startBackup(SystemId system, Instant now) {
+      return index.startBackup(system, now);
+    }
+
+    public void finishBackup(SystemId system, BackupIndex.BackupMetadata info, Instant now) {
+      index.finishBackup(system, info, now);
+    }
+
+    public void appendRevision(SystemId system, BackupIndex.BackupMetadata backup, Path path, Instant modTime, Sha256AndSize contentSummary) {
+      index.appendRevision(system, backup, path, modTime, contentSummary);
+    }
+
+    public void appendRevision(SystemId system, BackupIndex.BackupMetadata backup, Path path, HardLink link) {
+      index.appendRevision(system, backup, path, link);
+    }
+
+    public void appendRevision(SystemId system, BackupIndex.BackupMetadata backup, Path path, SymLink link) {
+      index.appendRevision(system, backup, path, link);
+    }
+
+    public void appendTombstone(SystemId system, BackupIndex.BackupMetadata backup, Path path) {
+      index.appendTombstone(system, backup, path);
+    }
+
+    public BackupReport addOrCanonicalizeBackedUpBlob(Sha256AndSize content, BackupReport backupReport) {
+      return index.addOrCanonicalizeBackedUpBlob(content, backupReport);
+    }
+
+    public void forgetBlob(Sha256AndSize content) {
+      index.forgetBlob(content);
+    }
+
+    public void forgetRevision(SystemId system, Path path, BackupIndex.Revision revision) {
+      index.forgetRevision(system, path, revision);
+    }
+
+    public void forgetBackup(SystemId system, BackupIndex.BackupMetadata info) {
+      index.forgetBackup(system, info);
+    }
+
+    public void forgetSystem(SystemId system) {
+      index.forgetSystem(system);
+    }
+
+    public void bumpCleanupGeneration() {
+      conflictBehavior = ConflictBehavior.ALWAYS_FAIL;
+      index.bumpCleanupGeneration();
+    }
+
+    public void commit(String newPassword) throws BackupIndex.MergeConflict, IOException {
       if (!open) {
         throw new IllegalStateException("Transaction has already been closed");
       }
-      parent.saveIndex(index, expectedTag, password, newPassword, onConflict);
-      password = newPassword;
+      var result = parent.saveIndex(index, expectedTag, password, newPassword, conflictBehavior);
+      index = result.index;
+      expectedTag = result.tag;
+      password = result.password;
     }
 
     @Override
