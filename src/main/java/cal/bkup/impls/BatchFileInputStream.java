@@ -23,7 +23,6 @@ import java.util.Iterator;
 import java.util.Map;
 
 class BatchFileInputStream extends InputStream {
-  private final Collection<Pair<RegularFile, Sha256AndSize>> files;
   private final ProgressDisplay display;
   private final Map<Path, Long> offsetsAtTarget;
   private final Map<Path, Long> sizesAtTarget;
@@ -33,7 +32,6 @@ class BatchFileInputStream extends InputStream {
   private final BlobTransformer transformer;
   private final Iterator<Pair<RegularFile, Sha256AndSize>> remaining;
   private long bytesSent;
-  private int finishedFiles;
   private @Owning @Nullable CurrentFileState current;
 
   private record CurrentFileState(
@@ -58,7 +56,6 @@ class BatchFileInputStream extends InputStream {
   }
 
   public BatchFileInputStream(Collection<Pair<RegularFile, Sha256AndSize>> files, ProgressDisplay display, Map<Path, Long> offsetsAtTarget, Map<Path, Long> sizesAtTarget, Map<Path, Sha256AndSize> actualSummaries, Filesystem fs, String key, BlobTransformer transformer) throws IOException {
-    this.files = files;
     this.display = display;
     this.offsetsAtTarget = offsetsAtTarget;
     this.sizesAtTarget = sizesAtTarget;
@@ -68,7 +65,6 @@ class BatchFileInputStream extends InputStream {
     this.transformer = transformer;
     this.remaining = files.iterator();
     this.bytesSent = 0L;
-    this.finishedFiles = 0;
 
     if (this.current != null) {
       this.current.close();
@@ -81,7 +77,6 @@ class BatchFileInputStream extends InputStream {
   private void closeCurrent() throws IOException {
     if (current != null) {
       var toClose = current;
-      ++finishedFiles;
       toClose.close();
       assert toClose.stats.isClosed();
       var path = toClose.currentFile.path();
