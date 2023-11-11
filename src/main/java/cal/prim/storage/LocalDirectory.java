@@ -7,7 +7,6 @@ import org.crashsafeio.DurableIOUtil;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -33,8 +32,9 @@ public class LocalDirectory implements EventuallyConsistentDirectory {
 
   @Override
   public void createOrReplace(String name, InputStream data) throws IOException {
-    try (OutputStream out = new AtomicDurableOutputStream(dir.resolve(name))) {
+    try (var out = new AtomicDurableOutputStream(dir.resolve(name))) {
       Util.copyStream(data, out);
+      out.commit();
     }
   }
 
