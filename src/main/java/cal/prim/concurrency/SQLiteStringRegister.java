@@ -40,7 +40,7 @@ public class SQLiteStringRegister implements StringRegister, Closeable {
         stmt.executeUpdate("INSERT OR IGNORE INTO tbl (key, value) VALUES (0, \"\")");
       }
       conn.commit();
-    } catch (Exception e) {
+    } catch (Throwable e) {
       try {
         conn.close();
       } catch (Exception onClose) {
